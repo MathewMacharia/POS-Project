@@ -150,6 +150,27 @@ export default function App() {
   const [showPass, setShowPass] = useState(false);
   const [loginError, setLoginError] = useState('');
 
+  // Offline Sync Monitoring State
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
+
+  useEffect(() => {
+    const updateSyncStatus = () => {
+      setIsOnline(navigator.onLine);
+      const queue = JSON.parse(localStorage.getItem('dufuka_sync_queue') || '[]');
+      setPendingSyncCount(queue.length);
+    };
+    window.addEventListener('online', updateSyncStatus);
+    window.addEventListener('offline', updateSyncStatus);
+    const interval = setInterval(updateSyncStatus, 2000);
+    updateSyncStatus();
+    return () => {
+      window.removeEventListener('online', updateSyncStatus);
+      window.removeEventListener('offline', updateSyncStatus);
+      clearInterval(interval);
+    };
+  }, []);
+
   // ----- 2. LOAD DATA FROM SUPABASE ON MOUNT WITH OFFLINE CACHE -----
   useEffect(() => {
     async function loadData() {
@@ -1491,10 +1512,79 @@ export default function App() {
               <NairobiClock />
             </div>
 
-            {/* Offline-Ready indicator validation */}
-            <div className="hidden md:flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900 px-3 py-1.5 rounded-lg text-[10px] text-emerald-700 dark:text-emerald-400 font-bold tracking-wider">
-              <Wifi className="w-4 h-4 text-emerald-500 animate-pulse pointer-events-none" />
-              BIASHARA READY
+            {/* Connection and Manual Sync Trigger Widget */}
+            <div className="flex items-center gap-2 text-xs font-bold font-sans">
+              {isOnline ? (
+                <div className="flex items-center gap-1.5 text-emerald-650 dark:text-emerald-450 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-1.5 rounded-lg border border-emerald-200/50">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>Online</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-955/30 px-3 py-1.5 rounded-lg border border-amber-200/50">
+                  <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+                  <span>Offline Mode</span>
+                </div>
+              )}
+
+              {pendingSyncCount > 0 && (
+                <button
+                  type="button"
+                  id="sync-offline-changes-header-btn"
+                  onClick={async () => {
+                    const confirmSync = window.confirm(`Found ${pendingSyncCount} offline changes to upload. Sync with database now?`);
+                    if (!confirmSync) return;
+                    try {
+                      await triggerSync();
+                      // Force reload local database maps by running loadData fetch cycle
+                      const [u, c, p, s, e, al, sup, sl] = await Promise.all([
+                        getLocalCache('profiles'),
+                        getLocalCache('categories'),
+                        getLocalCache('products'),
+                        getLocalCache('sales'),
+                        getLocalCache('expenses'),
+                        getLocalCache('audit_logs'),
+                        getLocalCache('suppliers'),
+                        getLocalCache('stock_logs')
+                      ]);
+                      setUsers(u.map(mapProfile));
+                      setCategories(c.map(mapCategory));
+                      setProducts(p.map(mapProduct));
+                      setSales(s.map(mapSale));
+                      setExpenses(e.map(mapExpense));
+                      setAuditLogs(al.map(mapAuditLog));
+                      setSuppliers(sup.map(mapSupplier));
+                      setStockLogs(sl.map(mapStockLog));
+
+                      // Fetch remote datasets
+                      const { data: productsData } = await supabase.from('products').select('*');
+                      if (productsData) {
+                        const merged = mergeRemoteWithSyncQueue('products', productsData);
+                        setProducts(merged.map(mapProduct));
+                        setLocalCache('products', merged);
+                      }
+                      const { data: salesData } = await supabase.from('sales').select('*');
+                      if (salesData) {
+                        const merged = mergeRemoteWithSyncQueue('sales', salesData);
+                        setSales(merged.map(mapSale));
+                        setLocalCache('sales', merged);
+                      }
+                      const { data: stockLogsData } = await supabase.from('stock_logs').select('*');
+                      if (stockLogsData) {
+                        const merged = mergeRemoteWithSyncQueue('stock_logs', stockLogsData);
+                        setStockLogs(merged.map(mapStockLog));
+                        setLocalCache('stock_logs', merged);
+                      }
+                      alert("🎉 Success: Sync complete! Stock levels and transaction ledger updated.");
+                    } catch (syncErr: any) {
+                      alert(`Sync failed: ${syncErr.message || 'Connection offline'}`);
+                    }
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-500 hover:scale-[1.02] text-white px-3.5 py-1.5 rounded-lg border border-emerald-500 flex items-center gap-1.5 transition duration-200 cursor-pointer shadow-md text-[11px]"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  SYNC OFFLINE CHANGES ({pendingSyncCount})
+                </button>
+              )}
             </div>
 
             {/* Notifications Alert Bells Badge and list pane */}
