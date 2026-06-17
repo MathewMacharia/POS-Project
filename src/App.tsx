@@ -385,8 +385,13 @@ export default function App() {
     changeAmount: number,
     discountAmount: number = 0
   ) => {
-    const todayISO = new Date().toISOString();
-    const receiptNo = `KPOS-20260608-${Math.floor(Math.random() * 900 + 100)}`; // June 8 simulation
+    const todayObj = new Date();
+    const yyyy = todayObj.getFullYear();
+    const mm = String(todayObj.getMonth() + 1).padStart(2, '0');
+    const dd = String(todayObj.getDate()).padStart(2, '0');
+    
+    const todayISO = todayObj.toISOString();
+    const receiptNo = `KPOS-${yyyy}${mm}${dd}-${Math.floor(Math.random() * 900 + 100)}`;
     const saleId = crypto.randomUUID();
 
     const subtotal = cartItems.reduce((sum, item) => sum + (item.sellingPrice * item.quantity), 0);
@@ -783,7 +788,7 @@ export default function App() {
   };
 
   // ----- 8. SYSTEM SHELF WARNING ENTITIES GENERATION -----
-  const currentTimestampForAlerts = new Date('2026-06-08').getTime();
+  const currentTimestampForAlerts = new Date().setHours(0, 0, 0, 0);
   const thirtyDaysLaterTimestampForAlerts = currentTimestampForAlerts + 30 * 24 * 60 * 60 * 1000;
 
   const systemAlertNotifications = useMemo(() => {

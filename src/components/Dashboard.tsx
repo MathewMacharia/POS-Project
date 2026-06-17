@@ -35,7 +35,8 @@ export default function Dashboard({
   currentUserRole
 }: DashboardProps) {
   // Stats calculations
-  const todayStr = '2026-06-08'; // System current local time is 2026-06-08
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   
   const formattedCurrency = (val: number) => {
     return new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 }).format(val);
@@ -46,8 +47,9 @@ export default function Dashboard({
   const totalSalesToday = salesToday.reduce((sum, s) => sum + s.total, 0);
   const transactionsTodayCount = salesToday.length;
 
-  // 2. Total sales this month (June 2026)
-  const salesThisMonth = sales.filter(s => s.dateAdded.startsWith('2026-06'));
+  // 2. Total sales this month
+  const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+  const salesThisMonth = sales.filter(s => s.dateAdded.startsWith(currentMonthStr));
   const totalSalesThisMonth = salesThisMonth.reduce((sum, s) => sum + s.total, 0);
 
   // 3. Stock metrics
@@ -62,7 +64,7 @@ export default function Dashboard({
   const outOfStockProducts = products.filter(p => p.quantityInStock === 0);
 
   // Expiry date monitoring
-  const currentTimestamp = new Date(todayStr).getTime();
+  const currentTimestamp = today.getTime();
   const thirtyDaysLaterTimestamp = currentTimestamp + 30 * 24 * 60 * 60 * 1000;
 
   const expiredProducts = products.filter(p => {
@@ -115,10 +117,14 @@ export default function Dashboard({
     return sum + saleProfit;
   }, 0);
 
-  // 7-day sales trend (June 1 - June 8)
-  const daysOfTrend = ['01', '02', '03', '04', '05', '06', '07', '08'];
-  const dailyTotals = daysOfTrend.map(day => {
-    const targetDate = `2026-06-${day}`;
+  // 7-day sales trend (last 8 days dynamically)
+  const daysOfTrend = Array.from({ length: 8 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (7 - i));
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  
+  const dailyTotals = daysOfTrend.map(targetDate => {
     return sales
       .filter(s => s.dateAdded.startsWith(targetDate))
       .reduce((sum, s) => sum + s.total, 0);
@@ -201,7 +207,7 @@ export default function Dashboard({
             </div>
           </div>
           <div className="mt-4 flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
-            <span>Month: June 2026</span>
+            <span>Month: {new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' })}</span>
             <span className="text-blue-600 dark:text-blue-400 font-medium font-mono">
               Profit: {formattedCurrency(totalProfitThisMonth)}
             </span>
@@ -318,7 +324,7 @@ export default function Dashboard({
             <div className="flex justify-between items-center">
               <div>
                 <h3 className="font-bold font-sans text-zinc-900 dark:text-white">Daily Revenue Trend</h3>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">Track operations revenue over the last 8 days (June 1 - June 8)</p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">Track operations revenue over the last 8 days</p>
               </div>
               <div className="text-right">
                 <span className="text-xs bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 font-semibold px-2 py-1 rounded">
@@ -401,13 +407,20 @@ export default function Dashboard({
                                 rx="4"
                                 className="fill-zinc-800/95 text-white stroke-zinc-700 shadow-lg" 
                               />
-                              <text 
+                               <text 
                                 x={Math.max(20, c.x - 70) + 70} 
                                 y={Math.max(5, c.y - 45) + 16} 
                                 className="text-[10px] fill-emerald-400 font-bold" 
                                 textAnchor="middle"
                               >
-                                June {daysOfTrend[idx]}, 2026
+                                {(() => {
+                                  try {
+                                    const d = new Date(daysOfTrend[idx]);
+                                    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                                  } catch (e) {
+                                    return daysOfTrend[idx];
+                                  }
+                                })()}
                               </text>
                               <text 
                                 x={Math.max(20, c.x - 70) + 70} 
@@ -426,12 +439,14 @@ export default function Dashboard({
                 })()}
 
                 {/* Bottom trend label dates */}
-                {daysOfTrend.map((day, idx) => {
+                {daysOfTrend.map((dateStr, idx) => {
                   const stepX = 630 / (dailyTotals.length - 1);
                   const x = 50 + idx * stepX;
+                  const parts = dateStr.split('-');
+                  const label = parts.length === 3 ? `${parts[1]}/${parts[2]}` : dateStr;
                   return (
                     <text key={idx} x={x} y="182" className="text-[10px] font-sans fill-zinc-500 text-center" textAnchor="middle">
-                      {`06/${day}`}
+                      {label}
                     </text>
                   );
                 })}
@@ -450,8 +465,8 @@ export default function Dashboard({
         {/* Payment Methods Stack Summary */}
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 shadow-xs flex flex-col justify-between" id="payment-methods-breakdown-panel">
           <div>
-            <h3 className="font-bold font-sans text-zinc-900 dark:text-white">Payment Split (M-Pesa dominance)</h3>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">June 2026 Monthly transaction splits</p>
+            <h3 className="font-bold font-sans text-zinc-900 dark:text-white">Payment Split</h3>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">{new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' })} Monthly transaction splits</p>
 
             {/* Stack bar visual graph */}
             <div className="mt-6 space-y-5" id="payment-channels-metrics">

@@ -37,7 +37,8 @@ export default function Reports({
   expenses = [],
   initialPeriod
 }: ReportsProps) {
-  const todayStr = '2026-06-08'; // System current local time is 2026-06-08
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
   // Helper currency formatter
   const KES = (amount: number) => {
@@ -207,10 +208,11 @@ export default function Reports({
     });
   }, [dailySales]);
 
-  // --- 2. MONTHLY MATH CALCULATIONS (For June 2026) ---
+  // --- 2. MONTHLY MATH CALCULATIONS ---
   const monthlySales = useMemo(() => {
-    return sales.filter(s => s.dateAdded.startsWith('2026-06'));
-  }, [sales]);
+    const currentMonthPrefix = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    return sales.filter(s => s.dateAdded.startsWith(currentMonthPrefix));
+  }, [sales, today]);
 
   const monthlyTotalsObj = useMemo(() => {
     return monthlySales.reduce((acc, s) => {
@@ -327,17 +329,18 @@ export default function Reports({
 
   const activeTotals = reportPeriod === 'daily' ? dailyTotalsObj : monthlyTotalsObj;
   const activeLabel = reportPeriod === 'daily' 
-    ? 'TODAY (June 8, 2026)' 
+    ? `TODAY (${today.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })})` 
     : reportPeriod === 'monthly'
-      ? 'THIS MONTH (June 2026)'
+      ? `THIS MONTH (${today.toLocaleString('en-US', { month: 'long', year: 'numeric' })})`
       : 'AI DIAGNOSTICS DEEP-DIVE';
 
   const totalPeriodExpenses = useMemo(() => {
-    const filterDateStr = reportPeriod === 'daily' ? todayStr : '2026-06';
+    const currentMonthPrefix = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    const filterDateStr = reportPeriod === 'daily' ? todayStr : currentMonthPrefix;
     return expenses
       .filter(e => e.date.startsWith(filterDateStr))
       .reduce((sum, e) => sum + e.amount, 0);
-  }, [expenses, reportPeriod, todayStr]);
+  }, [expenses, reportPeriod, todayStr, today]);
 
   return (
     <div className="space-y-6" id="reports-module-page">
@@ -392,7 +395,7 @@ export default function Reports({
                 : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
             }`}
           >
-            Monthly Audits (June)
+            Monthly Audits ({today.toLocaleString('en-US', { month: 'short' })})
           </button>
           <button
             onClick={() => setReportPeriod('ai_insights')}

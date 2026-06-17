@@ -47,9 +47,10 @@ export default function Stocks({
   const [discardNotes, setDiscardNotes] = useState('');
 
   // Timestamps
-  const todayStr = '2026-06-08'; // System current local time is 2026-06-08
-  const currentTimestamp = new Date(todayStr).getTime();
-  const thirtyDaysLaterTimestamp = currentTimestamp + 30 * 24 * 60 * 60 * 1050;
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const currentTimestamp = today.getTime();
+  const thirtyDaysLaterTimestamp = currentTimestamp + 30 * 24 * 60 * 60 * 1000;
 
   // Segmenting products according to alerts
   const segmentedProducts = useMemo(() => {
