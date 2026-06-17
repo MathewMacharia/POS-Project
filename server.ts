@@ -13,13 +13,15 @@ app.use(express.json({ limit: "30mb" }));
 
 // Lazy-initialized Gemini Client (ensures the key is read when the function is actually called)
 let aiClient: GoogleGenAI | null = null;
+let lastApiKey: string | null = null;
 
-function getGeminiClient(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY;
+function getGeminiClient(clientKey?: string): GoogleGenAI {
+  const apiKey = clientKey || process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error("GEMINI_API_KEY is not configured on the server. Please add your key to Secrets in Settings.");
   }
-  if (!aiClient) {
+  if (!aiClient || lastApiKey !== apiKey) {
+    lastApiKey = apiKey;
     aiClient = new GoogleGenAI({
       apiKey: apiKey,
       httpOptions: {
@@ -73,12 +75,13 @@ async function generateReportWithFallback(ai: GoogleGenAI, contents: string, con
 app.post("/api/reports/generate", async (req, res) => {
   try {
     const { sales = [], products = [], expenses = [], type = "monthly" } = req.body;
+    const clientKey = req.headers["x-gemini-key"] as string;
 
     console.log(`[AI Report Engine] Request received. Type: ${type}, Sales count: ${sales.length}, Products count: ${products.length}, Expenses count: ${expenses.length}`);
 
     let ai;
     try {
-      ai = getGeminiClient();
+      ai = getGeminiClient(clientKey);
     } catch (kErr: any) {
       return res.status(500).json({ 
         error: "GEMINI_API_KEY is not configured on the server.",

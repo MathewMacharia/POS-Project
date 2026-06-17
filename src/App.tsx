@@ -123,6 +123,9 @@ export default function App() {
   useEffect(() => {
     setFormSettings(shopSettings);
   }, [shopSettings]);
+  const [geminiKey, setGeminiKey] = useState<string>(() => {
+    return localStorage.getItem('dufuka_gemini_api_key') || '';
+  });
   const [users, setUsers] = useState<User[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
 
@@ -1729,6 +1732,42 @@ export default function App() {
                         className="w-full text-xs text-zinc-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-zinc-100 file:text-zinc-700 hover:file:bg-zinc-200 file:cursor-pointer dark:file:bg-zinc-800 dark:file:text-zinc-300"
                       />
                     </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* API Integrations & Keys */}
+              <div className="bg-white dark:bg-zinc-910 border border-zinc-200 dark:border-zinc-800 p-5 rounded-2xl" id="settings-api-section">
+                <h3 className="font-extrabold text-zinc-900 dark:text-white text-base flex items-center gap-1.5 pb-3 border-b border-zinc-100 dark:border-zinc-800 mb-4">
+                  <Key className="text-emerald-600 w-4.5 h-4.5" />
+                  API Integrations &amp; Secrets
+                </h3>
+                <div className="space-y-4 text-xs font-semibold">
+                  <div>
+                    <label className="text-zinc-500 block mb-1">Gemini AI API Key (required for generating AI reports)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        placeholder="AIzaSy..."
+                        className="flex-1 px-3 py-2 bg-zinc-900 dark:bg-zinc-900 text-white dark:text-white border border-zinc-700 rounded-xl focus:ring-1 focus:ring-emerald-500 outline-hidden font-mono text-xs"
+                        value={geminiKey}
+                        onChange={(e) => setGeminiKey(e.target.value)}
+                      />
+                      <button
+                        onClick={() => {
+                          localStorage.setItem('dufuka_gemini_api_key', geminiKey);
+                          addAuditLog('API Secrets Updated', 'Configured Gemini AI key securely in terminal workspace.');
+                          alert('Gemini API Key saved successfully!');
+                        }}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl cursor-pointer flex items-center gap-1 shadow-sm transition"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        Save Key
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-zinc-400 mt-1.5 leading-normal">
+                      This key is stored locally in your browser and sent with report requests to authorize Gemini 3.5 Flash ledger synthesis.
+                    </p>
                   </div>
                 </div>
               </div>

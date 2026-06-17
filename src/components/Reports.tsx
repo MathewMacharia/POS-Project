@@ -91,9 +91,13 @@ export default function Reports({
     setAiIsLoading(true);
     setAiError(null);
     try {
+      const geminiApiKey = localStorage.getItem('dufuka_gemini_api_key') || '';
       const resp = await fetch("/api/reports/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(geminiApiKey ? { "x-gemini-key": geminiApiKey } : {})
+        },
         body: JSON.stringify({
           sales,
           products,
