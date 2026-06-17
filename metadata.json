@@ -1,0 +1,6 @@
+{
+  "name": "Kenyan Retail Shop POS",
+  "description": "A modern, offline-ready Point of Sale (POS) system for physical retail shops in Kenya with inventory management, sales tracking, and financial reports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
