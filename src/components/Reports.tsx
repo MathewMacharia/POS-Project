@@ -19,15 +19,10 @@ import {
   AlertCircle,
   Info,
   CheckCircle,
-  Download,
-  Key,
-  Lock,
-  Settings,
-  Save
+  Download
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { Product, Sale, Expense } from '../types';
-import { encryptApiKey, decryptApiKey } from '../utils/encryption';
 
 interface ReportsProps {
   sales: Sale[];
@@ -71,10 +66,6 @@ export default function Reports({
   const [aiIsLoading, setAiIsLoading] = useState<boolean>(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [loadingStepIdx, setLoadingStepIdx] = useState<number>(0);
-  const [geminiApiKey, setGeminiApiKey] = useState<string>(() => {
-    return decryptApiKey(localStorage.getItem('dufuka_gemini_api_key') || '');
-  });
-  const [showKeyConfig, setShowKeyConfig] = useState<boolean>(!localStorage.getItem('dufuka_gemini_api_key'));
 
   const loadingSteps = [
     "Compiling transaction ledgers...",
@@ -102,6 +93,7 @@ export default function Reports({
     setAiIsLoading(true);
     setAiError(null);
     try {
+      const geminiApiKey = localStorage.getItem('dufuka_gemini_api_key') || '';
       const resp = await fetch("/api/reports/generate", {
         method: "POST",
         headers: { 
@@ -759,22 +751,7 @@ export default function Reports({
               </p>
             </div>
 
-            <div className="flex items-center gap-3 print:hidden animate-fade-in">
-              <button
-                onClick={() => setShowKeyConfig(!showKeyConfig)}
-                className={`p-2 rounded-xl border transition cursor-pointer flex items-center gap-1.5 text-xs font-bold ${
-                  geminiApiKey 
-                    ? 'border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-850 text-zinc-650 dark:text-zinc-300' 
-                    : 'border-amber-200 dark:border-amber-900 bg-amber-50/50 dark:bg-amber-950/25 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-amber-700 dark:text-amber-400'
-                }`}
-                title="Configure Gemini API Key"
-              >
-                {geminiApiKey ? <Lock className="w-3.5 h-3.5 text-emerald-600" /> : <Key className="w-3.5 h-3.5 text-amber-600 animate-bounce" />}
-                <span className="hidden sm:inline">
-                  {geminiApiKey ? 'Key Secured' : 'Setup Key'}
-                </span>
-              </button>
-
+            <div className="flex items-center gap-3 print:hidden">
               <div className="bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl flex" id="ai-scope-selector">
                 <button
                   onClick={() => setAiReportPeriod('weekly')}
@@ -816,61 +793,6 @@ export default function Reports({
             </div>
           </div>
 
-          {/* Inline Key Configuration Pane */}
-          {showKeyConfig && (
-            <div className="bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-200 dark:border-zinc-800 p-5 rounded-2xl space-y-4 animate-fade-in" id="ai-key-config-panel">
-              <div className="flex justify-between items-start">
-                <div className="space-y-1">
-                  <h4 className="text-sm font-bold text-zinc-850 dark:text-zinc-250 flex items-center gap-2">
-                    <Key className="w-4 h-4 text-emerald-600" />
-                    Gemini AI API Key Setup
-                  </h4>
-                  <p className="text-[11px] text-zinc-550 dark:text-zinc-400 leading-normal">
-                    This key is encrypted and saved in your local browser storage. It is only sent to the local server to authorize your requests.
-                  </p>
-                </div>
-                {geminiApiKey && (
-                  <span className="bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-450 px-2.5 py-0.5 rounded-full text-[10px] font-bold border border-emerald-100 dark:border-emerald-900 flex items-center gap-1">
-                    <Lock className="w-3.5 h-3.5" /> Secured Locally
-                  </span>
-                )}
-              </div>
-              <div className="flex flex-col sm:flex-row gap-3">
-                <input
-                  type="password"
-                  placeholder="Enter your Gemini API Key (e.g. AIzaSy...)"
-                  className="flex-1 px-3 py-2 bg-white dark:bg-zinc-900 text-zinc-800 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded-xl focus:ring-1 focus:ring-emerald-500 outline-hidden font-mono text-xs"
-                  value={geminiApiKey}
-                  onChange={(e) => setGeminiApiKey(e.target.value)}
-                />
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => {
-                      localStorage.setItem('dufuka_gemini_api_key', encryptApiKey(geminiApiKey));
-                      setShowKeyConfig(false);
-                      setAiError(null);
-                    }}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    Save &amp; Lock
-                  </button>
-                  {geminiApiKey && (
-                    <button
-                      onClick={() => {
-                        localStorage.removeItem('dufuka_gemini_api_key');
-                        setGeminiApiKey('');
-                      }}
-                      className="px-3 py-2 bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-700 dark:text-zinc-300 font-bold rounded-xl text-xs transition cursor-pointer"
-                    >
-                      Clear Key
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Loading State */}
           {aiIsLoading && (
             <div className="py-12 flex flex-col items-center justify-center text-center space-y-4" id="ai-loading-state">
@@ -890,50 +812,15 @@ export default function Reports({
           {aiError && (
             <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 p-4 rounded-xl flex gap-3 text-xs text-red-800 dark:text-red-300" id="ai-error-state">
               <AlertCircle className="w-5 h-5 shrink-0 text-red-600 dark:text-red-400" />
-              <div className="space-y-1 w-full">
+              <div className="space-y-1">
                 <p className="font-bold">Diagnostics Synthesis Error</p>
                 <p className="text-zinc-650 dark:text-zinc-400">{aiError}</p>
-                
-                {/* Inline setup when key is not configured */}
-                {(aiError.includes("GEMINI_API_KEY") || !geminiApiKey) && (
-                  <div className="mt-3 p-3 bg-white dark:bg-zinc-900 border border-red-100 dark:border-red-900/50 rounded-xl space-y-2 max-w-lg">
-                    <p className="font-bold text-zinc-850 dark:text-zinc-200 text-[11px]">Set API Key to Resolve:</p>
-                    <div className="flex gap-2">
-                      <input
-                        type="password"
-                        placeholder="Enter key (AIzaSy...)"
-                        className="flex-1 px-3 py-1.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-xs font-mono"
-                        value={geminiApiKey}
-                        onChange={(e) => setGeminiApiKey(e.target.value)}
-                      />
-                      <button
-                        onClick={() => {
-                          localStorage.setItem('dufuka_gemini_api_key', encryptApiKey(geminiApiKey));
-                          setAiError(null);
-                          handleGenerateAIReport();
-                        }}
-                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-[11px] transition cursor-pointer"
-                      >
-                        Save &amp; Retry
-                      </button>
-                    </div>
-                  </div>
-                )}
-                
-                <div className="flex items-center gap-2 pt-2">
-                  <button
-                    onClick={handleGenerateAIReport}
-                    className="px-3 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-850 text-red-800 dark:text-red-250 font-bold rounded transition cursor-pointer"
-                  >
-                    Retry Request
-                  </button>
-                  <button
-                    onClick={() => setShowKeyConfig(true)}
-                    className="px-3 py-1 bg-zinc-200 hover:bg-zinc-305 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-700 dark:text-zinc-300 font-bold rounded transition cursor-pointer"
-                  >
-                    Configure Key
-                  </button>
-                </div>
+                <button
+                  onClick={handleGenerateAIReport}
+                  className="mt-2 px-3 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-850 text-red-800 dark:text-red-250 font-bold rounded transition"
+                >
+                  Retry Request
+                </button>
               </div>
             </div>
           )}
