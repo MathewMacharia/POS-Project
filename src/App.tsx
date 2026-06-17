@@ -61,7 +61,7 @@ import UsersComponent from './components/Users';
 import AuditLogs from './components/AuditLogs';
 import Expenses from './components/Expenses';
 
-// Supabase DB Client & Model Mappers
+// Supabase DB Client & Model Mappers & Offline Sync System
 import { 
   supabase, 
   mapProfile, toDbProfile,
@@ -71,7 +71,9 @@ import {
   mapExpense, toDbExpense,
   mapAuditLog, toDbAuditLog,
   mapSupplier, toDbSupplier,
-  mapStockLog, toDbStockLog 
+  mapStockLog, toDbStockLog,
+  getLocalCache, setLocalCache,
+  queueAction, triggerSync
 } from './utils/supabaseClient';
 
 function NairobiClock() {
@@ -137,46 +139,98 @@ export default function App() {
   const [showPass, setShowPass] = useState(false);
   const [loginError, setLoginError] = useState('');
 
-  // ----- 2. LOAD DATA FROM SUPABASE ON MOUNT -----
+  // ----- 2. LOAD DATA FROM SUPABASE ON MOUNT WITH OFFLINE CACHE -----
   useEffect(() => {
     async function loadData() {
+      // Load from local cache immediately so app starts instantly (even offline)
+      setUsers(getLocalCache('profiles').map(mapProfile));
+      setCategories(getLocalCache('categories').map(mapCategory));
+      setProducts(getLocalCache('products').map(mapProduct));
+      setSales(getLocalCache('sales').map(mapSale));
+      setExpenses(getLocalCache('expenses').map(mapExpense));
+      setAuditLogs(getLocalCache('audit_logs').map(mapAuditLog));
+      setSuppliers(getLocalCache('suppliers').map(mapSupplier));
+      setStockLogs(getLocalCache('stock_logs').map(mapStockLog));
+
+      if (!navigator.onLine) return;
+
       try {
         // Fetch profiles (users)
         const { data: profilesData } = await supabase.from('profiles').select('*');
-        if (profilesData) setUsers(profilesData.map(mapProfile));
+        if (profilesData) {
+          setUsers(profilesData.map(mapProfile));
+          setLocalCache('profiles', profilesData);
+        }
 
         // Fetch categories
         const { data: categoriesData } = await supabase.from('categories').select('*');
-        if (categoriesData) setCategories(categoriesData.map(mapCategory));
+        if (categoriesData) {
+          setCategories(categoriesData.map(mapCategory));
+          setLocalCache('categories', categoriesData);
+        }
 
         // Fetch products
         const { data: productsData } = await supabase.from('products').select('*');
-        if (productsData) setProducts(productsData.map(mapProduct));
+        if (productsData) {
+          setProducts(productsData.map(mapProduct));
+          setLocalCache('products', productsData);
+        }
 
         // Fetch sales
         const { data: salesData } = await supabase.from('sales').select('*');
-        if (salesData) setSales(salesData.map(mapSale));
+        if (salesData) {
+          setSales(salesData.map(mapSale));
+          setLocalCache('sales', salesData);
+        }
 
         // Fetch expenses
         const { data: expensesData } = await supabase.from('expenses').select('*');
-        if (expensesData) setExpenses(expensesData.map(mapExpense));
+        if (expensesData) {
+          setExpenses(expensesData.map(mapExpense));
+          setLocalCache('expenses', expensesData);
+        }
 
         // Fetch audit logs
         const { data: auditData } = await supabase.from('audit_logs').select('*');
-        if (auditData) setAuditLogs(auditData.map(mapAuditLog));
+        if (auditData) {
+          setAuditLogs(auditData.map(mapAuditLog));
+          setLocalCache('audit_logs', auditData);
+        }
 
         // Fetch suppliers
         const { data: suppliersData } = await supabase.from('suppliers').select('*');
-        if (suppliersData) setSuppliers(suppliersData.map(mapSupplier));
+        if (suppliersData) {
+          setSuppliers(suppliersData.map(mapSupplier));
+          setLocalCache('suppliers', suppliersData);
+        }
 
         // Fetch stock logs
         const { data: stockLogsData } = await supabase.from('stock_logs').select('*');
-        if (stockLogsData) setStockLogs(stockLogsData.map(mapStockLog));
+        if (stockLogsData) {
+          setStockLogs(stockLogsData.map(mapStockLog));
+          setLocalCache('stock_logs', stockLogsData);
+        }
+
+        // Trigger sync for any unsynced offline changes
+        triggerSync(() => {
+          // Re-load data after successful sync to get latest UUIDs
+          loadData();
+        });
       } catch (err) {
         console.error("Error loading data from Supabase:", err);
       }
     }
     loadData();
+
+    // Sync listener when device comes back online
+    const handleOnline = () => {
+      console.log("Device is back online! Triggering sync...");
+      triggerSync(() => {
+        loadData();
+      });
+    };
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
   }, []);
 
   // UI preferences persistence
@@ -218,25 +272,18 @@ export default function App() {
 
   // Append new audit trace logs
   const addAuditLog = useCallback(async (action: string, details: string) => {
+    const id = crypto.randomUUID();
     const newLog: AuditLog = {
-      id: '',
+      id,
       userId: currentUser?.id || 'anonymous',
       userName: currentUser?.fullName || 'System Guest',
       action,
       details,
       timestamp: new Date().toISOString()
     };
-    try {
-      const { data } = await supabase
-        .from('audit_logs')
-        .insert([toDbAuditLog(newLog)])
-        .select();
-      if (data && data[0]) {
-        setAuditLogs(prev => [...prev, mapAuditLog(data[0])]);
-      }
-    } catch (err) {
-      console.error("Failed to write audit log:", err);
-    }
+    setAuditLogs(prev => [...prev, newLog]);
+    setLocalCache('audit_logs', [...getLocalCache('audit_logs'), toDbAuditLog(newLog)]);
+    queueAction('insert', 'audit_logs', toDbAuditLog(newLog));
   }, [currentUser]);
 
   // ----- 3. LOGIN / OVERRIDE CREDENTIAL CHECKS -----
@@ -249,14 +296,33 @@ export default function App() {
       return;
     }
 
-    try {
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('username', loginUsername.trim().toLowerCase())
-        .single();
+    const usernameLower = loginUsername.trim().toLowerCase();
 
-      if (error || !profile) {
+    try {
+      let profile: any = null;
+
+      if (navigator.onLine) {
+        try {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('username', usernameLower)
+            .single();
+
+          if (!error && data) {
+            profile = data;
+          }
+        } catch {
+          // Fallback to cache if network fetch fails
+        }
+      }
+
+      if (!profile) {
+        const cachedProfiles = getLocalCache('profiles');
+        profile = cachedProfiles.find(p => p.username.toLowerCase() === usernameLower);
+      }
+
+      if (!profile) {
         setLoginError('Operator username not found on directory.');
         return;
       }
@@ -278,7 +344,7 @@ export default function App() {
       const msg = `Operator ${foundUser.fullName} successfully logged into ${foundUser.role === 'admin' ? 'administrator' : 'cashier terminal'} desk.`;
       
       const newAuditLog: AuditLog = {
-        id: '',
+        id: crypto.randomUUID(),
         userId: foundUser.id,
         userName: foundUser.fullName,
         action: 'User Login',
@@ -286,14 +352,9 @@ export default function App() {
         timestamp: new Date().toISOString()
       };
       
-      const { data: insertedAudit } = await supabase
-        .from('audit_logs')
-        .insert([toDbAuditLog(newAuditLog)])
-        .select();
-      
-      if (insertedAudit && insertedAudit[0]) {
-        setAuditLogs(prev => [...prev, mapAuditLog(insertedAudit[0])]);
-      }
+      setAuditLogs(prev => [...prev, newAuditLog]);
+      setLocalCache('audit_logs', [...getLocalCache('audit_logs'), toDbAuditLog(newAuditLog)]);
+      queueAction('insert', 'audit_logs', toDbAuditLog(newAuditLog));
 
       if (foundUser.role === 'admin') {
         setActiveTab('dashboard');
@@ -326,12 +387,13 @@ export default function App() {
   ) => {
     const todayISO = new Date().toISOString();
     const receiptNo = `KPOS-20260608-${Math.floor(Math.random() * 900 + 100)}`; // June 8 simulation
+    const saleId = crypto.randomUUID();
 
     const subtotal = cartItems.reduce((sum, item) => sum + (item.sellingPrice * item.quantity), 0);
     const taxAmount = Math.round(Math.max(0, subtotal - discountAmount) * 0.16);
 
     const newSale: Sale = {
-      id: '', // DB will assign UUID
+      id: saleId,
       receiptNumber: receiptNo,
       items: cartItems,
       subtotal,
@@ -348,32 +410,29 @@ export default function App() {
     };
 
     try {
-      // 1. Save Sale to database
-      const { data: insertedSale, error: saleErr } = await supabase
-        .from('sales')
-        .insert([toDbSale(newSale)])
-        .select();
+      // 1. Save Sale locally
+      setSales(prev => [...prev, newSale]);
+      setLocalCache('sales', [...getLocalCache('sales'), toDbSale(newSale)]);
+      queueAction('insert', 'sales', toDbSale(newSale));
 
-      if (saleErr || !insertedSale || !insertedSale[0]) {
-        throw new Error(saleErr?.message || "Failed to save checkout to database");
-      }
+      // 2. Reduce products stock quantities locally and queue updates
+      const updatedProducts = products.map(p => {
+        const cartMatch = cartItems.find(item => item.id === p.id);
+        if (cartMatch) {
+          const newQty = Math.max(0, p.quantityInStock - cartMatch.quantity);
+          queueAction('update', 'products', { quantity_in_stock: newQty }, p.id);
+          return { ...p, quantityInStock: newQty };
+        }
+        return p;
+      });
+      setProducts(updatedProducts);
+      setLocalCache('products', updatedProducts.map(toDbProduct));
 
-      const mappedSale = mapSale(insertedSale[0]);
-      setSales(prev => [...prev, mappedSale]);
-
-      // 2. Reduce products stock quantities in-database and write logs
+      // 3. Append to stock movement logs locally and queue
       for (const item of cartItems) {
-        const productMatch = products.find(p => p.id === item.id);
-        const currentQty = productMatch ? productMatch.quantityInStock : 0;
-        const newQty = Math.max(0, currentQty - item.quantity);
-
-        await supabase
-          .from('products')
-          .update({ quantity_in_stock: newQty })
-          .eq('id', item.id);
-
+        const logId = crypto.randomUUID();
         const newStockLog: StockLog = {
-          id: '',
+          id: logId,
           productId: item.id,
           productName: item.name,
           changeQty: -item.quantity,
@@ -383,24 +442,15 @@ export default function App() {
           notes: `Sold via checkout receipt ${receiptNo}`
         };
 
-        const { data: insertedLog } = await supabase
-          .from('stock_logs')
-          .insert([toDbStockLog(newStockLog)])
-          .select();
-        
-        if (insertedLog && insertedLog[0]) {
-          setStockLogs(prev => [...prev, mapStockLog(insertedLog[0])]);
-        }
+        setStockLogs(prev => [...prev, newStockLog]);
+        setLocalCache('stock_logs', [...getLocalCache('stock_logs'), toDbStockLog(newStockLog)]);
+        queueAction('insert', 'stock_logs', toDbStockLog(newStockLog));
       }
 
-      // Re-fetch products to update local state fully
-      const { data: productsData } = await supabase.from('products').select('*');
-      if (productsData) setProducts(productsData.map(mapProduct));
-
-      // 3. Attach Security Audit Trail
+      // 4. Attach Security Audit Trail
       addAuditLog('Complete Sale', `Completed Checkout receipt ${receiptNo} worth KES ${subtotal} via ${paymentMethod}.`);
 
-      return mappedSale;
+      return newSale;
     } catch (err: any) {
       alert("Checkout failed: " + err.message);
       return null;
@@ -410,42 +460,36 @@ export default function App() {
   // ----- 5. CORE INVENTORY ACTIONS: REGISTER, MODIFY, DISCARD, RESTOCK -----
   const handleRegisterProduct = async (newProd: Omit<Product, 'id' | 'dateAdded'>) => {
     const timestampISO = new Date().toISOString();
+    const productId = crypto.randomUUID();
+    const productItem: Product = {
+      ...newProd,
+      id: productId,
+      dateAdded: timestampISO
+    };
     
     try {
-      const { data: insertedProd, error } = await supabase
-        .from('products')
-        .insert([toDbProduct(newProd)])
-        .select();
-
-      if (error || !insertedProd || !insertedProd[0]) {
-        throw new Error(error?.message || "Failed to register product");
-      }
-
-      const mappedProduct = mapProduct(insertedProd[0]);
-      setProducts(prev => [...prev, mappedProduct]);
+      setProducts(prev => [...prev, productItem]);
+      setLocalCache('products', [...getLocalCache('products'), toDbProduct(productItem)]);
+      queueAction('insert', 'products', toDbProduct(productItem));
 
       // Add stock logarithm for traceability audit
+      const stockLogId = crypto.randomUUID();
       const newStockLog: StockLog = {
-        id: '',
-        productId: mappedProduct.id,
-        productName: mappedProduct.name,
-        changeQty: mappedProduct.quantityInStock,
+        id: stockLogId,
+        productId,
+        productName: productItem.name,
+        changeQty: productItem.quantityInStock,
         type: 'initial',
         timestamp: timestampISO,
         operatorName: currentUser?.fullName || 'Admin',
         notes: `Registered new catalog item with baseline quantities.`
       };
 
-      const { data: insertedLog } = await supabase
-        .from('stock_logs')
-        .insert([toDbStockLog(newStockLog)])
-        .select();
-      
-      if (insertedLog && insertedLog[0]) {
-        setStockLogs(prev => [...prev, mapStockLog(insertedLog[0])]);
-      }
+      setStockLogs(prev => [...prev, newStockLog]);
+      setLocalCache('stock_logs', [...getLocalCache('stock_logs'), toDbStockLog(newStockLog)]);
+      queueAction('insert', 'stock_logs', toDbStockLog(newStockLog));
 
-      addAuditLog('Create Product', `Registered fresh product ${mappedProduct.name} @ KES ${mappedProduct.sellingPrice}.`);
+      addAuditLog('Create Product', `Registered fresh product ${productItem.name} @ KES ${productItem.sellingPrice}.`);
     } catch (err: any) {
       alert("Product registration failed: " + err.message);
     }
@@ -453,14 +497,9 @@ export default function App() {
 
   const handleModifyProduct = async (updatedProd: Product) => {
     try {
-      const { error } = await supabase
-        .from('products')
-        .update(toDbProduct(updatedProd))
-        .eq('id', updatedProd.id);
-
-      if (error) throw error;
-
       setProducts(prev => prev.map(p => p.id === updatedProd.id ? updatedProd : p));
+      setLocalCache('products', getLocalCache('products').map(p => p.id === updatedProd.id ? toDbProduct(updatedProd) : p));
+      queueAction('update', 'products', toDbProduct(updatedProd), updatedProd.id);
       addAuditLog('Update Product', `Modified product profiles of "${updatedProd.name}".`);
     } catch (err: any) {
       alert("Modification failed: " + err.message);
@@ -470,14 +509,9 @@ export default function App() {
   const handleDeleteProduct = async (prodId: string) => {
     const prodMatch = products.find(p => p.id === prodId);
     try {
-      const { error } = await supabase
-        .from('products')
-        .delete()
-        .eq('id', prodId);
-
-      if (error) throw error;
-
       setProducts(prev => prev.filter(p => p.id !== prodId));
+      setLocalCache('products', getLocalCache('products').filter(p => p.id !== prodId));
+      queueAction('delete', 'products', null, prodId);
       addAuditLog('Delete Product', `Permanently deleted catalog key "${prodMatch?.name || prodId}" from shelves.`);
     } catch (err: any) {
       alert("Delete failed: " + err.message);
@@ -485,17 +519,19 @@ export default function App() {
   };
 
   const handleRegisterCategory = async (categoryName: string) => {
+    const categoryId = crypto.randomUUID();
+    const dateAdded = new Date().toISOString();
+    const newCat: Category = {
+      id: categoryId,
+      name: categoryName,
+      isCustom: true,
+      dateAdded
+    };
+
     try {
-      const { data: insertedCat, error } = await supabase
-        .from('categories')
-        .insert([{ name: categoryName, is_custom: true }])
-        .select();
-
-      if (error || !insertedCat || !insertedCat[0]) {
-        throw new Error(error?.message || "Failed to create category");
-      }
-
-      setCategories(prev => [...prev, mapCategory(insertedCat[0])]);
+      setCategories(prev => [...prev, newCat]);
+      setLocalCache('categories', [...getLocalCache('categories'), { id: categoryId, name: categoryName, is_custom: true, date_added: dateAdded }]);
+      queueAction('insert', 'categories', { id: categoryId, name: categoryName, is_custom: true, date_added: dateAdded });
       addAuditLog('Create Category', `Created custom visual category filter "${categoryName}".`);
     } catch (err: any) {
       alert("Category creation failed: " + err.message);
@@ -511,24 +547,27 @@ export default function App() {
     const newQty = pMatch.quantityInStock + restockQty;
 
     try {
-      const { error } = await supabase
-        .from('products')
-        .update({ 
-          quantity_in_stock: newQty,
-          ...(expiryDate ? { expiry_date: expiryDate } : {})
-        })
-        .eq('id', productId);
-
-      if (error) throw error;
-
       setProducts(prev => prev.map(p => p.id === productId ? {
         ...p,
         quantityInStock: newQty,
         expiryDate: expiryDate ? expiryDate : p.expiryDate
       } : p));
 
+      const updatedDbProduct = toDbProduct({
+        ...pMatch,
+        quantityInStock: newQty,
+        expiryDate: expiryDate ? expiryDate : pMatch.expiryDate
+      });
+
+      setLocalCache('products', getLocalCache('products').map(p => p.id === productId ? updatedDbProduct : p));
+      queueAction('update', 'products', { 
+        quantity_in_stock: newQty,
+        ...(expiryDate ? { expiry_date: expiryDate } : {})
+      }, productId);
+
+      const logId = crypto.randomUUID();
       const log: StockLog = {
-        id: '',
+        id: logId,
         productId,
         productName: pMatch.name,
         changeQty: restockQty,
@@ -538,14 +577,9 @@ export default function App() {
         notes: expiryDate ? `${notes} (Expiry: ${expiryDate})` : notes
       };
 
-      const { data: insertedLog } = await supabase
-        .from('stock_logs')
-        .insert([toDbStockLog(log)])
-        .select();
-      
-      if (insertedLog && insertedLog[0]) {
-        setStockLogs(prev => [...prev, mapStockLog(insertedLog[0])]);
-      }
+      setStockLogs(prev => [...prev, log]);
+      setLocalCache('stock_logs', [...getLocalCache('stock_logs'), toDbStockLog(log)]);
+      queueAction('insert', 'stock_logs', toDbStockLog(log));
 
       addAuditLog('Restock Product', `Incremented inventory of "${pMatch.name}" by +${restockQty} units.${expiryDate ? ` New expiry date keyed in: ${expiryDate}` : ''}`);
     } catch (err: any) {
@@ -562,17 +596,13 @@ export default function App() {
     const currentQty = pMatch.quantityInStock;
 
     try {
-      const { error } = await supabase
-        .from('products')
-        .update({ quantity_in_stock: 0 })
-        .eq('id', productId);
-
-      if (error) throw error;
-
       setProducts(prev => prev.map(p => p.id === productId ? { ...p, quantityInStock: 0 } : p));
+      setLocalCache('products', getLocalCache('products').map(p => p.id === productId ? { ...p, quantity_in_stock: 0 } : p));
+      queueAction('update', 'products', { quantity_in_stock: 0 }, productId);
 
+      const logId = crypto.randomUUID();
       const log: StockLog = {
-        id: '',
+        id: logId,
         productId,
         productName: pMatch.name,
         changeQty: -currentQty,
@@ -582,14 +612,9 @@ export default function App() {
         notes
       };
 
-      const { data: insertedLog } = await supabase
-        .from('stock_logs')
-        .insert([toDbStockLog(log)])
-        .select();
-      
-      if (insertedLog && insertedLog[0]) {
-        setStockLogs(prev => [...prev, mapStockLog(insertedLog[0])]);
-      }
+      setStockLogs(prev => [...prev, log]);
+      setLocalCache('stock_logs', [...getLocalCache('stock_logs'), toDbStockLog(log)]);
+      queueAction('insert', 'stock_logs', toDbStockLog(log));
 
       addAuditLog('Discard expired product', `Discarded remaining ${currentQty} units of expired "${pMatch.name}" and locked to zero.`);
     } catch (err: any) {
@@ -599,23 +624,18 @@ export default function App() {
 
   // ----- EXTRA: EXPENSE MODULE MANAGERS -----
   const handleRecordExpense = async (newExpFields: Omit<Expense, 'id' | 'timestamp' | 'recordedBy'>) => {
-    const completeExpense: Partial<Expense> = {
+    const expenseId = crypto.randomUUID();
+    const completeExpense: Expense = {
       ...newExpFields,
+      id: expenseId,
       timestamp: new Date().toISOString(),
       recordedBy: currentUser?.fullName || 'Administrator'
     };
 
     try {
-      const { data: insertedExpense, error } = await supabase
-        .from('expenses')
-        .insert([toDbExpense(completeExpense)])
-        .select();
-
-      if (error || !insertedExpense || !insertedExpense[0]) {
-        throw new Error(error?.message || "Failed to record expense");
-      }
-
-      setExpenses(prev => [...prev, mapExpense(insertedExpense[0])]);
+      setExpenses(prev => [...prev, completeExpense]);
+      setLocalCache('expenses', [...getLocalCache('expenses'), toDbExpense(completeExpense)]);
+      queueAction('insert', 'expenses', toDbExpense(completeExpense));
       addAuditLog('Record Expense', `Logged financial expense under category "${completeExpense.category}" for KES ${completeExpense.amount}.`);
     } catch (err: any) {
       alert("Expense recording failed: " + err.message);
@@ -628,14 +648,9 @@ export default function App() {
 
     if (window.confirm(`Are you sure you want to permanently delete expense entry "${itemToDel.itemName}" total KES ${itemToDel.amount}?`)) {
       try {
-        const { error } = await supabase
-          .from('expenses')
-          .delete()
-          .eq('id', expenseId);
-
-        if (error) throw error;
-
         setExpenses(prev => prev.filter(e => e.id !== expenseId));
+        setLocalCache('expenses', getLocalCache('expenses').filter(e => e.id !== expenseId));
+        queueAction('delete', 'expenses', null, expenseId);
         addAuditLog('Delete Expense', `Removed expense log "${itemToDel.itemName}" of category "${itemToDel.category}" worth KES ${itemToDel.amount}.`);
       } catch (err: any) {
         alert("Expense removal failed: " + err.message);
@@ -645,23 +660,18 @@ export default function App() {
 
   // ----- 6. USER/CASHIER MANAGEMENT ACTIONS -----
   const handleRegisterUser = async (newUserFields: Omit<User, 'id'>) => {
+    const userId = crypto.randomUUID();
     const defaultPin = "1234";
     const completeUser = {
       ...newUserFields,
+      id: userId,
       pin: defaultPin
     };
 
     try {
-      const { data: insertedUser, error } = await supabase
-        .from('profiles')
-        .insert([toDbProfile(completeUser)])
-        .select();
-
-      if (error || !insertedUser || !insertedUser[0]) {
-        throw new Error(error?.message || "Failed to register profile");
-      }
-
-      setUsers(prev => [...prev, mapProfile(insertedUser[0])]);
+      setUsers(prev => [...prev, mapProfile(toDbProfile(completeUser))]);
+      setLocalCache('profiles', [...getLocalCache('profiles'), toDbProfile(completeUser)]);
+      queueAction('insert', 'profiles', toDbProfile(completeUser));
       addAuditLog('User Registered', `Registered operator credentials for cashiers @${completeUser.username} (${completeUser.fullName}).`);
     } catch (err: any) {
       alert("Registration failed: " + err.message);
@@ -675,14 +685,9 @@ export default function App() {
     const nextState = !uMatch.active;
 
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ active: nextState })
-        .eq('id', userId);
-
-      if (error) throw error;
-
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, active: nextState } : u));
+      setLocalCache('profiles', getLocalCache('profiles').map(p => p.id === userId ? { ...p, active: nextState } : p));
+      queueAction('update', 'profiles', { active: nextState }, userId);
       addAuditLog('Employee Status Adjustment', `Toggled employee shift login block for ${uMatch.fullName} to ${nextState ? 'Unlocked' : 'Shift Locked'}.`);
     } catch (err: any) {
       alert("Toggle status failed: " + err.message);

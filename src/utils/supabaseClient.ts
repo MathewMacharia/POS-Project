@@ -26,6 +26,7 @@ export function mapProfile(p: any): User {
 
 export function toDbProfile(u: Partial<User> & { pin?: string }) {
   return {
+    id: u.id,
     username: u.username,
     full_name: u.fullName,
     email: u.email,
@@ -64,6 +65,7 @@ export function mapProduct(p: any): Product {
 
 export function toDbProduct(p: Partial<Product>) {
   return {
+    id: p.id,
     name: p.name,
     category: p.category,
     barcode: p.barcode,
@@ -98,7 +100,7 @@ export function mapSale(s: any): Sale {
 
 export function toDbSale(s: Sale) {
   return {
-    id: s.id.startsWith("sale_") ? undefined : s.id, // Let DB handle uuid generation if desired, or send custom
+    id: s.id,
     receipt_number: s.receiptNumber,
     items: s.items,
     subtotal: s.subtotal,
@@ -109,7 +111,7 @@ export function toDbSale(s: Sale) {
     payment_details_ref: s.paymentDetailsRef || null,
     paid_amount: s.paidAmount,
     change_amount: s.changeAmount,
-    cashier_id: s.cashierId.startsWith("usr_") ? null : s.cashierId, // Keep it aligned
+    cashier_id: s.cashierId,
     cashier_name: s.cashierName,
     date_added: s.dateAdded
   };
@@ -130,6 +132,7 @@ export function mapExpense(e: any): Expense {
 
 export function toDbExpense(e: Partial<Expense>) {
   return {
+    id: e.id,
     category: e.category,
     item_name: e.itemName,
     amount: e.amount,
@@ -153,7 +156,8 @@ export function mapAuditLog(a: any): AuditLog {
 
 export function toDbAuditLog(a: AuditLog) {
   return {
-    user_id: a.userId.startsWith("usr_") || a.userId === "anonymous" || a.userId === "system" ? null : a.userId,
+    id: a.id || undefined,
+    user_id: a.userId === "anonymous" || a.userId === "system" ? null : a.userId,
     user_name: a.userName,
     action: a.action,
     details: a.details,
@@ -174,6 +178,7 @@ export function mapSupplier(s: any): Supplier {
 
 export function toDbSupplier(s: Partial<Supplier>) {
   return {
+    id: s.id,
     name: s.name,
     phone: s.phone,
     email: s.email,
@@ -197,7 +202,8 @@ export function mapStockLog(sl: any): StockLog {
 
 export function toDbStockLog(sl: StockLog) {
   return {
-    product_id: sl.productId.startsWith("prod_") ? null : sl.productId,
+    id: sl.id || undefined,
+    product_id: sl.productId,
     product_name: sl.productName,
     change_qty: sl.changeQty,
     type: sl.type,
@@ -206,4 +212,130 @@ export function toDbStockLog(sl: StockLog) {
     notes: sl.notes
   };
 }
+
+// --- Offline & Sync System ---
+
+const CACHE_KEYS: Record<string, string> = {
+  profiles: 'dufuka_offline_profiles',
+  categories: 'dufuka_offline_categories',
+  products: 'dufuka_offline_products',
+  sales: 'dufuka_offline_sales',
+  expenses: 'dufuka_offline_expenses',
+  audit_logs: 'dufuka_offline_audit_logs',
+  suppliers: 'dufuka_offline_suppliers',
+  stock_logs: 'dufuka_offline_stock_logs'
+};
+
+interface QueueItem {
+  id: string; // sync item action id
+  action: 'insert' | 'update' | 'delete';
+  table: string;
+  payload: any;
+  targetId?: string;
+}
+
+export function getLocalCache(table: string, fallback: any[] = []): any[] {
+  try {
+    const key = CACHE_KEYS[table] || `dufuka_offline_${table}`;
+    const data = localStorage.getItem(key);
+    return data ? JSON.parse(data) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function setLocalCache(table: string, data: any[]) {
+  try {
+    const key = CACHE_KEYS[table] || `dufuka_offline_${table}`;
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch (err) {
+    console.error("LocalCache save failed:", err);
+  }
+}
+
+function getSyncQueue(): QueueItem[] {
+  try {
+    const q = localStorage.getItem('dufuka_sync_queue');
+    return q ? JSON.parse(q) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSyncQueue(queue: QueueItem[]) {
+  localStorage.setItem('dufuka_sync_queue', JSON.stringify(queue));
+}
+
+export function queueAction(action: 'insert' | 'update' | 'delete', table: string, payload: any, targetId?: string) {
+  const queue = getSyncQueue();
+  queue.push({
+    id: `sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    action,
+    table,
+    payload,
+    targetId
+  });
+  saveSyncQueue(queue);
+  triggerSync();
+}
+
+let isSyncing = false;
+
+export async function triggerSync(onSyncSuccess?: () => void) {
+  if (isSyncing || !navigator.onLine) return;
+  isSyncing = true;
+
+  const queue = getSyncQueue();
+  if (queue.length === 0) {
+    isSyncing = false;
+    return;
+  }
+
+  console.log(`[Offline Sync] Starting sync of ${queue.length} pending actions.`);
+
+  const remainingQueue: QueueItem[] = [];
+  let hasNetworkError = false;
+
+  for (const item of queue) {
+    if (hasNetworkError) {
+      remainingQueue.push(item);
+      continue;
+    }
+
+    try {
+      if (item.action === 'insert') {
+        const { error } = await supabase.from(item.table).insert([item.payload]);
+        if (error) {
+          console.error(`[Offline Sync] Insert error for ${item.table}:`, error);
+        }
+      } else if (item.action === 'update') {
+        const { error } = await supabase.from(item.table).update(item.payload).eq('id', item.targetId);
+        if (error) {
+          console.error(`[Offline Sync] Update error for ${item.table}:`, error);
+        }
+      } else if (item.action === 'delete') {
+        const { error } = await supabase.from(item.table).delete().eq('id', item.targetId);
+        if (error) {
+          console.error(`[Offline Sync] Delete error for ${item.table}:`, error);
+        }
+      }
+    } catch (err: any) {
+      if (err.message && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError') || err.message.includes('network'))) {
+        console.warn("[Offline Sync] Network connectivity lost. Halting sync queue.");
+        hasNetworkError = true;
+        remainingQueue.push(item);
+      } else {
+        console.error(`[Offline Sync] Error processing queue item:`, err);
+      }
+    }
+  }
+
+  saveSyncQueue(remainingQueue);
+  isSyncing = false;
+
+  if (!hasNetworkError && remainingQueue.length === 0 && onSyncSuccess) {
+    onSyncSuccess();
+  }
+}
+
 
