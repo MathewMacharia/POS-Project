@@ -119,7 +119,7 @@ export default function Inventory({
       buyingPrice: '',
       sellingPrice: '',
       quantityInStock: '',
-      supplierName: suppliers[0]?.name || 'Bidco Africa Ltd',
+      supplierName: '',
       customSupplierName: '',
       description: '',
       expiryDate: ''
@@ -142,7 +142,7 @@ export default function Inventory({
       buyingPrice: product.buyingPrice.toString(),
       sellingPrice: product.sellingPrice.toString(),
       quantityInStock: product.quantityInStock.toString(),
-      supplierName: isCustomVal ? 'Other' : (product.supplierName || (suppliers[0]?.name || '')),
+      supplierName: isCustomVal ? 'Other' : (product.supplierName || ''),
       customSupplierName: isCustomVal ? product.supplierName : '',
       description: product.description || '',
       expiryDate: product.expiryDate || ''
@@ -568,7 +568,28 @@ export default function Inventory({
               {/* Category selector & Suppler Name */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-zinc-500 dark:text-zinc-400 block mb-1">Category Category *</label>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-zinc-500 dark:text-zinc-400">Category Category *</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newCat = window.prompt("Enter new Category name:");
+                        if (newCat && newCat.trim()) {
+                          const exists = categories.some(cat => cat.name.toLowerCase() === newCat.trim().toLowerCase());
+                          if (exists) {
+                            alert('This category already exists.');
+                            setFormData(prev => ({ ...prev, category: newCat.trim() }));
+                          } else {
+                            onCreateCategory(newCat.trim());
+                            setFormData(prev => ({ ...prev, category: newCat.trim() }));
+                          }
+                        }
+                      }}
+                      className="text-emerald-600 hover:text-emerald-700 font-bold hover:underline cursor-pointer"
+                    >
+                      + Add New
+                    </button>
+                  </div>
                   <select
                     value={formData.category}
                     onChange={(e) => setFormData({ ...formData, category: e.target.value })}
@@ -586,6 +607,7 @@ export default function Inventory({
                     onChange={(e) => setFormData({ ...formData, supplierName: e.target.value })}
                     className="w-full px-3 py-2 bg-zinc-900 dark:bg-zinc-900 text-white dark:text-zinc-100 border border-zinc-700 rounded-lg focus:ring-1 focus:ring-emerald-500 outline-hidden font-semibold cursor-pointer"
                   >
+                    <option value="" className="bg-zinc-900 text-white">-- None (Optional) --</option>
                     {suppliers.map((s, i) => (
                       <option key={i} value={s.name} className="bg-zinc-900 text-white">{s.name}</option>
                     ))}
