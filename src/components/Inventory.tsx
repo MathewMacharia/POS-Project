@@ -593,10 +593,9 @@ export default function Inventory({
                   </select>
                   {formData.supplierName === 'Other' && (
                     <div className="mt-2 text-left">
-                      <label className="text-emerald-700 dark:text-emerald-400 block mb-1 font-bold">Specify Custom Supplier Name *</label>
+                      <label className="text-emerald-700 dark:text-emerald-400 block mb-1 font-bold">Specify Custom Supplier Name (Optional)</label>
                       <input
                         type="text"
-                        required
                         placeholder="e.g. Kipchimchim Wholesalers"
                         value={formData.customSupplierName}
                         onChange={(e) => setFormData({ ...formData, customSupplierName: e.target.value })}
