@@ -40,7 +40,19 @@ export default function Reports({
   initialPeriod
 }: ReportsProps) {
   const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const todayStr = (() => {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Africa/Nairobi',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    const parts = formatter.formatToParts(today);
+    const y = parts.find(p => p.type === 'year')?.value;
+    const m = parts.find(p => p.type === 'month')?.value;
+    const d = parts.find(p => p.type === 'day')?.value;
+    return `${y}-${m}-${d}`;
+  })();
 
   // Helper currency formatter
   const KES = (amount: number) => {
@@ -300,9 +312,18 @@ export default function Reports({
     });
   }, [dailySales]);
 
-  // --- 2. MONTHLY MATH CALCULATIONS ---
   const monthlySales = useMemo(() => {
-    const currentMonthPrefix = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    const currentMonthPrefix = (() => {
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Africa/Nairobi',
+        year: 'numeric',
+        month: '2-digit'
+      });
+      const parts = formatter.formatToParts(today);
+      const y = parts.find(p => p.type === 'year')?.value;
+      const m = parts.find(p => p.type === 'month')?.value;
+      return `${y}-${m}`;
+    })();
     return sales.filter(s => s.dateAdded.startsWith(currentMonthPrefix));
   }, [sales, today]);
 
