@@ -551,44 +551,79 @@ export default function App() {
     const pMatch = products.find(p => p.id === productId);
     if (!pMatch) return;
 
-    const newQty = pMatch.quantityInStock + restockQty;
-
     try {
-      setProducts(prev => prev.map(p => p.id === productId ? {
-        ...p,
-        quantityInStock: newQty,
-        expiryDate: expiryDate ? expiryDate : p.expiryDate
-      } : p));
+      if (pMatch.expiryDate) {
+        // Create a separate new batch product line
+        const newProductId = crypto.randomUUID();
+        const newProductItem: Product = {
+          ...pMatch,
+          id: newProductId,
+          quantityInStock: restockQty,
+          expiryDate: expiryDate || pMatch.expiryDate,
+          dateAdded: todayISO
+        };
 
-      const updatedDbProduct = toDbProduct({
-        ...pMatch,
-        quantityInStock: newQty,
-        expiryDate: expiryDate ? expiryDate : pMatch.expiryDate
-      });
+        setProducts(prev => [...prev, newProductItem]);
+        setLocalCache('products', [...getLocalCache('products'), toDbProduct(newProductItem)]);
+        queueAction('insert', 'products', toDbProduct(newProductItem));
 
-      setLocalCache('products', getLocalCache('products').map(p => p.id === productId ? updatedDbProduct : p));
-      queueAction('update', 'products', { 
-        quantity_in_stock: newQty,
-        ...(expiryDate ? { expiry_date: expiryDate } : {})
-      }, productId);
+        const logId = crypto.randomUUID();
+        const log: StockLog = {
+          id: logId,
+          productId: newProductId,
+          productName: pMatch.name,
+          changeQty: restockQty,
+          type: 'initial',
+          timestamp: todayISO,
+          operatorName: currentUser?.fullName || 'Admin',
+          notes: `Separate batch restocked (Expiry: ${newProductItem.expiryDate}). ${notes}`
+        };
 
-      const logId = crypto.randomUUID();
-      const log: StockLog = {
-        id: logId,
-        productId,
-        productName: pMatch.name,
-        changeQty: restockQty,
-        type: 'restock',
-        timestamp: todayISO,
-        operatorName: currentUser?.fullName || 'Admin',
-        notes: expiryDate ? `${notes} (Expiry: ${expiryDate})` : notes
-      };
+        setStockLogs(prev => [...prev, log]);
+        setLocalCache('stock_logs', [...getLocalCache('stock_logs'), toDbStockLog(log)]);
+        queueAction('insert', 'stock_logs', toDbStockLog(log));
 
-      setStockLogs(prev => [...prev, log]);
-      setLocalCache('stock_logs', [...getLocalCache('stock_logs'), toDbStockLog(log)]);
-      queueAction('insert', 'stock_logs', toDbStockLog(log));
+        addAuditLog('Restock New Batch', `Created new product batch line for "${pMatch.name}" with +${restockQty} units expiring on ${newProductItem.expiryDate}.`);
+      } else {
+        // Standard in-place restock for non-expiring products
+        const newQty = pMatch.quantityInStock + restockQty;
 
-      addAuditLog('Restock Product', `Incremented inventory of "${pMatch.name}" by +${restockQty} units.${expiryDate ? ` New expiry date keyed in: ${expiryDate}` : ''}`);
+        setProducts(prev => prev.map(p => p.id === productId ? {
+          ...p,
+          quantityInStock: newQty,
+          expiryDate: expiryDate ? expiryDate : p.expiryDate
+        } : p));
+
+        const updatedDbProduct = toDbProduct({
+          ...pMatch,
+          quantityInStock: newQty,
+          expiryDate: expiryDate ? expiryDate : pMatch.expiryDate
+        });
+
+        setLocalCache('products', getLocalCache('products').map(p => p.id === productId ? updatedDbProduct : p));
+        queueAction('update', 'products', { 
+          quantity_in_stock: newQty,
+          ...(expiryDate ? { expiry_date: expiryDate } : {})
+        }, productId);
+
+        const logId = crypto.randomUUID();
+        const log: StockLog = {
+          id: logId,
+          productId,
+          productName: pMatch.name,
+          changeQty: restockQty,
+          type: 'restock',
+          timestamp: todayISO,
+          operatorName: currentUser?.fullName || 'Admin',
+          notes: expiryDate ? `${notes} (Expiry: ${expiryDate})` : notes
+        };
+
+        setStockLogs(prev => [...prev, log]);
+        setLocalCache('stock_logs', [...getLocalCache('stock_logs'), toDbStockLog(log)]);
+        queueAction('insert', 'stock_logs', toDbStockLog(log));
+
+        addAuditLog('Restock Product', `Incremented inventory of "${pMatch.name}" by +${restockQty} units.${expiryDate ? ` New expiry date keyed in: ${expiryDate}` : ''}`);
+      }
     } catch (err: any) {
       alert("Restock failed: " + err.message);
     }
