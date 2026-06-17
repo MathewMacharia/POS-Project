@@ -293,6 +293,24 @@ export function queueAction(action: 'insert' | 'update' | 'delete', table: strin
 
 let isSyncing = false;
 
+function isTransientError(error: any): boolean {
+  if (!error) return false;
+  const msg = (error.message || '').toLowerCase();
+  const code = error.code || '';
+  const status = error.status || 0;
+  
+  return (
+    msg.includes('fetch') ||
+    msg.includes('network') ||
+    msg.includes('timeout') ||
+    msg.includes('connection') ||
+    msg.includes('abort') ||
+    code === 'PGRST102' ||
+    status === 0 ||
+    status >= 500
+  );
+}
+
 export async function triggerSync(onSyncSuccess?: () => void) {
   if (isSyncing || !navigator.onLine) return;
   isSyncing = true;
@@ -319,25 +337,35 @@ export async function triggerSync(onSyncSuccess?: () => void) {
         const { error } = await supabase.from(item.table).insert([item.payload]);
         if (error) {
           console.error(`[Offline Sync] Insert error for ${item.table}:`, error);
+          if (isTransientError(error)) {
+            throw new Error(`Transient: ${error.message || 'database timeout'}`);
+          }
         }
       } else if (item.action === 'update') {
         const { error } = await supabase.from(item.table).update(item.payload).eq('id', item.targetId);
         if (error) {
           console.error(`[Offline Sync] Update error for ${item.table}:`, error);
+          if (isTransientError(error)) {
+            throw new Error(`Transient: ${error.message || 'database timeout'}`);
+          }
         }
       } else if (item.action === 'delete') {
         const { error } = await supabase.from(item.table).delete().eq('id', item.targetId);
         if (error) {
           console.error(`[Offline Sync] Delete error for ${item.table}:`, error);
+          if (isTransientError(error)) {
+            throw new Error(`Transient: ${error.message || 'database timeout'}`);
+          }
         }
       }
     } catch (err: any) {
-      if (err.message && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError') || err.message.includes('network'))) {
-        console.warn("[Offline Sync] Network connectivity lost. Halting sync queue.");
+      const errMsg = (err.message || '').toLowerCase();
+      if (errMsg.includes('failed to fetch') || errMsg.includes('network') || errMsg.includes('timeout') || errMsg.includes('transient')) {
+        console.warn("[Offline Sync] Network/Server connectivity lost. Halting sync queue.");
         hasNetworkError = true;
         remainingQueue.push(item);
       } else {
-        console.error(`[Offline Sync] Error processing queue item:`, err);
+        console.error(`[Offline Sync] Permanent error processing queue item:`, err);
       }
     }
   }
@@ -347,6 +375,35 @@ export async function triggerSync(onSyncSuccess?: () => void) {
 
   if (!hasNetworkError && remainingQueue.length === 0 && onSyncSuccess) {
     onSyncSuccess();
+  }
+}
+
+export function mergeRemoteWithSyncQueue(table: string, remoteData: any[]): any[] {
+  try {
+    const queue = getSyncQueue();
+    if (queue.length === 0) return remoteData;
+    
+    let merged = [...remoteData];
+
+    for (const item of queue) {
+      if (item.table !== table) continue;
+
+      if (item.action === 'insert') {
+        const exists = merged.some(x => x.id === item.payload.id);
+        if (!exists) {
+          merged.push(item.payload);
+        }
+      } else if (item.action === 'update') {
+        merged = merged.map(x => x.id === item.targetId ? { ...x, ...item.payload } : x);
+      } else if (item.action === 'delete') {
+        merged = merged.filter(x => x.id !== item.targetId);
+      }
+    }
+
+    return merged;
+  } catch (err) {
+    console.error("Error merging remote with sync queue:", err);
+    return remoteData;
   }
 }
 

@@ -76,7 +76,7 @@ import {
   mapSupplier, toDbSupplier,
   mapStockLog, toDbStockLog,
   getLocalCache, setLocalCache,
-  queueAction, triggerSync
+  queueAction, triggerSync, mergeRemoteWithSyncQueue
 } from './utils/supabaseClient';
 
 function NairobiClock() {
@@ -172,57 +172,65 @@ export default function App() {
         // Fetch profiles (users)
         const { data: profilesData } = await supabase.from('profiles').select('*');
         if (profilesData) {
-          setUsers(profilesData.map(mapProfile));
-          setLocalCache('profiles', profilesData);
+          const merged = mergeRemoteWithSyncQueue('profiles', profilesData);
+          setUsers(merged.map(mapProfile));
+          setLocalCache('profiles', merged);
         }
 
         // Fetch categories
         const { data: categoriesData } = await supabase.from('categories').select('*');
         if (categoriesData) {
-          setCategories(categoriesData.map(mapCategory));
-          setLocalCache('categories', categoriesData);
+          const merged = mergeRemoteWithSyncQueue('categories', categoriesData);
+          setCategories(merged.map(mapCategory));
+          setLocalCache('categories', merged);
         }
 
         // Fetch products
         const { data: productsData } = await supabase.from('products').select('*');
         if (productsData) {
-          setProducts(productsData.map(mapProduct));
-          setLocalCache('products', productsData);
+          const merged = mergeRemoteWithSyncQueue('products', productsData);
+          setProducts(merged.map(mapProduct));
+          setLocalCache('products', merged);
         }
 
         // Fetch sales
         const { data: salesData } = await supabase.from('sales').select('*');
         if (salesData) {
-          setSales(salesData.map(mapSale));
-          setLocalCache('sales', salesData);
+          const merged = mergeRemoteWithSyncQueue('sales', salesData);
+          setSales(merged.map(mapSale));
+          setLocalCache('sales', merged);
         }
 
         // Fetch expenses
         const { data: expensesData } = await supabase.from('expenses').select('*');
         if (expensesData) {
-          setExpenses(expensesData.map(mapExpense));
-          setLocalCache('expenses', expensesData);
+          const merged = mergeRemoteWithSyncQueue('expenses', expensesData);
+          setExpenses(merged.map(mapExpense));
+          setLocalCache('expenses', merged);
         }
 
         // Fetch audit logs
         const { data: auditData } = await supabase.from('audit_logs').select('*');
         if (auditData) {
-          setAuditLogs(auditData.map(mapAuditLog));
-          setLocalCache('audit_logs', auditData);
+          const merged = mergeRemoteWithSyncQueue('audit_logs', auditData);
+          setAuditLogs(merged.map(mapAuditLog));
+          setLocalCache('audit_logs', merged);
         }
 
         // Fetch suppliers
         const { data: suppliersData } = await supabase.from('suppliers').select('*');
         if (suppliersData) {
-          setSuppliers(suppliersData.map(mapSupplier));
-          setLocalCache('suppliers', suppliersData);
+          const merged = mergeRemoteWithSyncQueue('suppliers', suppliersData);
+          setSuppliers(merged.map(mapSupplier));
+          setLocalCache('suppliers', merged);
         }
 
         // Fetch stock logs
         const { data: stockLogsData } = await supabase.from('stock_logs').select('*');
         if (stockLogsData) {
-          setStockLogs(stockLogsData.map(mapStockLog));
-          setLocalCache('stock_logs', stockLogsData);
+          const merged = mergeRemoteWithSyncQueue('stock_logs', stockLogsData);
+          setStockLogs(merged.map(mapStockLog));
+          setLocalCache('stock_logs', merged);
         }
       } catch (err) {
         console.error("Error loading data from Supabase:", err);
