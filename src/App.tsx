@@ -165,6 +165,10 @@ export default function App() {
       if (!navigator.onLine) return;
 
       try {
+        // Trigger and await sync for any unsynced offline changes first
+        // so that they are written to Supabase before we query remote state
+        await triggerSync();
+
         // Fetch profiles (users)
         const { data: profilesData } = await supabase.from('profiles').select('*');
         if (profilesData) {
@@ -220,12 +224,6 @@ export default function App() {
           setStockLogs(stockLogsData.map(mapStockLog));
           setLocalCache('stock_logs', stockLogsData);
         }
-
-        // Trigger sync for any unsynced offline changes
-        triggerSync(() => {
-          // Re-load data after successful sync to get latest UUIDs
-          loadData();
-        });
       } catch (err) {
         console.error("Error loading data from Supabase:", err);
       }
@@ -235,9 +233,7 @@ export default function App() {
     // Sync listener when device comes back online
     const handleOnline = () => {
       console.log("Device is back online! Triggering sync...");
-      triggerSync(() => {
-        loadData();
-      });
+      loadData();
     };
     window.addEventListener('online', handleOnline);
     return () => window.removeEventListener('online', handleOnline);
