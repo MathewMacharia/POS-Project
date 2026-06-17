@@ -79,6 +79,8 @@ import {
   queueAction, triggerSync, mergeRemoteWithSyncQueue
 } from './utils/supabaseClient';
 
+import { encryptApiKey, decryptApiKey } from './utils/encryption';
+
 function NairobiClock() {
   const [time, setTime] = useState<string>('');
 
@@ -91,19 +93,28 @@ function NairobiClock() {
         second: '2-digit',
         hour12: false
       };
-      setTime(new Date().toLocaleTimeString('en-US', options));
+      setTime(new Intl.DateTimeFormat('en-US', options).format(new Date()));
     };
-
     updateTime();
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
+    const timer = setInterval(updateTime, 1000);
+    return () => clearInterval(timer);
   }, []);
 
-  return <span>Nairobi: {time || '09:54 AM'}</span>;
+  return (
+    <div className="flex items-center gap-1 text-[11px] font-bold text-zinc-500 font-mono">
+      <Clock className="w-3.5 h-3.5 text-emerald-500 animate-pulse" />
+      <span>{time} EAT</span>
+    </div>
+  );
 }
 
 export default function App() {
-  // ----- 1. SHARED STATE FROM SUPABASE & LOCALSTORAGE FOR UI PREFS -----
+  // Offline network status tracker
+  const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
+  const [syncQueueCount, setSyncQueueCount] = useState<number>(0);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+
+  // App core data states loaded from Dexie primary database
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('dufuka_current_user');
     return saved ? JSON.parse(saved) : null;
@@ -124,7 +135,7 @@ export default function App() {
     setFormSettings(shopSettings);
   }, [shopSettings]);
   const [geminiKey, setGeminiKey] = useState<string>(() => {
-    return localStorage.getItem('dufuka_gemini_api_key') || '';
+    return decryptApiKey(localStorage.getItem('dufuka_gemini_api_key') || '');
   });
   const [users, setUsers] = useState<User[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -1799,7 +1810,7 @@ export default function App() {
                       />
                       <button
                         onClick={() => {
-                          localStorage.setItem('dufuka_gemini_api_key', geminiKey);
+                          localStorage.setItem('dufuka_gemini_api_key', encryptApiKey(geminiKey));
                           addAuditLog('API Secrets Updated', 'Configured Gemini AI key securely in terminal workspace.');
                           alert('Gemini API Key saved successfully!');
                         }}
