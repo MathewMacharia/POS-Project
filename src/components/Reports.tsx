@@ -18,8 +18,10 @@ import {
   RefreshCw,
   AlertCircle,
   Info,
-  CheckCircle
+  CheckCircle,
+  Download
 } from 'lucide-react';
+import { jsPDF } from 'jspdf';
 import { Product, Sale, Expense } from '../types';
 
 interface ReportsProps {
@@ -118,6 +120,92 @@ export default function Reports({
     } finally {
       setAiIsLoading(false);
     }
+  };
+
+  const handleDownloadAIPDF = () => {
+    if (!aiReportData) return;
+    const doc = new jsPDF();
+    
+    // Page setup
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(18);
+    doc.setTextColor(5, 150, 105);
+    doc.text("AUTOMATED SUPERMARKET AI ANALYTICS REPORT", 14, 20);
+    
+    doc.setFontSize(10);
+    doc.setFont("Helvetica", "normal");
+    doc.setTextColor(100, 100, 100);
+    doc.text(`Generated: ${new Date().toLocaleString('en-KE')} | Scope: ${aiReportPeriod.toUpperCase()}`, 14, 26);
+    
+    doc.setDrawColor(200, 200, 200);
+    doc.line(14, 28, 196, 28);
+    
+    // Executive Summary
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(13);
+    doc.setTextColor(30, 30, 30);
+    doc.text("Executive Summary", 14, 38);
+    
+    doc.setFont("Helvetica", "normal");
+    doc.setFontSize(9.5);
+    doc.setTextColor(60, 60, 60);
+    const summaryLines = doc.splitTextToSize(aiReportData.summary || "", 182);
+    doc.text(summaryLines, 14, 44);
+    
+    let yPos = 44 + (summaryLines.length * 5) + 8;
+    
+    // Financial Metrics
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(13);
+    doc.setTextColor(30, 30, 30);
+    doc.text("Financial Ledger Summary", 14, yPos);
+    
+    doc.setFont("Helvetica", "normal");
+    doc.setFontSize(9.5);
+    yPos += 6;
+    
+    const KES_FORMAT = (val: number) => `KES ${val.toLocaleString('en-KE')}`;
+    
+    doc.text(`Total Revenue Analyzed: ${KES_FORMAT(aiReportData.analytics?.totalRevenue || 0)}`, 14, yPos);
+    yPos += 5;
+    doc.text(`Gross Profit Analyzed: ${KES_FORMAT(aiReportData.analytics?.totalProfit || 0)}`, 14, yPos);
+    yPos += 5;
+    doc.text(`Total Discounts Granted: ${KES_FORMAT(aiReportData.analytics?.totalDiscounts || 0)}`, 14, yPos);
+    yPos += 5;
+    doc.text(`Total Expenses Analyzed: ${KES_FORMAT(aiReportData.analytics?.totalExpenses || 0)}`, 14, yPos);
+    
+    yPos += 12;
+    
+    // Growth Strategy Dossier
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(13);
+    doc.setTextColor(30, 30, 30);
+    doc.text("Owner's Growth Strategy Dossier", 14, yPos);
+    
+    doc.setFont("Helvetica", "normal");
+    doc.setFontSize(9.5);
+    doc.setTextColor(60, 60, 60);
+    yPos += 6;
+    
+    const dossierText = aiReportData.reportMarkdown || "";
+    const cleanText = dossierText
+      .replace(/### /g, "")
+      .replace(/## /g, "")
+      .replace(/# /g, "")
+      .replace(/\*\*/g, "");
+      
+    const dossierLines = doc.splitTextToSize(cleanText, 182);
+    
+    for (let i = 0; i < dossierLines.length; i++) {
+      if (yPos > 275) {
+        doc.addPage();
+        yPos = 20;
+      }
+      doc.text(dossierLines[i], 14, yPos);
+      yPos += 5.5;
+    }
+    
+    doc.save(`POS_AI_Analytics_Report_${aiReportPeriod}_${new Date().toISOString().slice(0, 10)}.pdf`);
   };
 
   // Helper markdown parser to keep code bulletproof
@@ -756,6 +844,24 @@ export default function Reports({
           {aiReportData && !aiIsLoading && !aiError && (
             <div className="space-y-8 animate-fade-in" id="ai-report-complete">
               
+              {/* PDF & Print Actions */}
+              <div className="flex justify-end gap-3 print:hidden">
+                <button
+                  onClick={handleDownloadAIPDF}
+                  className="px-3.5 py-2 bg-zinc-100 hover:bg-zinc-250 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-850 dark:text-zinc-200 font-bold rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  Download PDF Report
+                </button>
+                <button
+                  onClick={() => window.print()}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  <Printer className="w-4 h-4" />
+                  Print Report
+                </button>
+              </div>
+
               {/* 1. Summary Block */}
               <div className="bg-gradient-to-r from-emerald-500/5 to-teal-500/5 border border-emerald-500/20 p-5 rounded-2xl flex flex-col md:flex-row items-start gap-4">
                 <div className="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-600 flex items-center justify-center shrink-0">
