@@ -435,7 +435,7 @@ export default function Reports({
   }, [expenses, reportPeriod, todayStr, today]);
 
   return (
-    <div className="space-y-6" id="reports-module-page">
+    <div className="space-y-6 printable-report-area" id="reports-module-page">
       
       {/* Visual title row + Actions */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 rounded-2xl" id="reports-header-box">
@@ -448,7 +448,7 @@ export default function Reports({
         </div>
         
         {/* Export Buttons */}
-        <div className="flex gap-2">
+        <div className="flex gap-2 print:hidden">
           <button
             onClick={generateSalesCSV}
             className="px-3.5 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700 font-semibold rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer"
@@ -467,7 +467,7 @@ export default function Reports({
       </div>
 
       {/* Selector Tabs and Duration label */}
-      <div className="flex justify-between items-center" id="reports-period-selector-panel">
+      <div className="flex justify-between items-center print:hidden" id="reports-period-selector-panel">
         <div className="bg-zinc-100 dark:bg-zinc-800/80 p-1 rounded-xl flex" id="reports-tab-controls">
           <button
             onClick={() => setReportPeriod('daily')}
@@ -751,7 +751,7 @@ export default function Reports({
               </p>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 print:hidden">
               <div className="bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl flex" id="ai-scope-selector">
                 <button
                   onClick={() => setAiReportPeriod('weekly')}

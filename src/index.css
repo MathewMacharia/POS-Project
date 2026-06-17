@@ -6,9 +6,11 @@
     visibility: hidden;
   }
   
-  /* Make only the receipt modal contents visible */
+  /* Make only the receipt modal contents or report contents visible */
   #printable-thermal-receipt,
-  #printable-thermal-receipt * {
+  #printable-thermal-receipt *,
+  .printable-report-area,
+  .printable-report-area * {
     visibility: visible;
   }
   
@@ -24,6 +26,19 @@
     color: black !important;
     border: none !important;
     box-shadow: none !important;
+  }
+
+  /* Layout configuration for full-page reports on print */
+  .printable-report-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100% !important;
+    max-width: 100% !important;
+    background: white !important;
+    color: black !important;
+    padding: 0 !important;
+    margin: 0 !important;
   }
   
   /* Ensure the modals and layout backdrops are transparent/hidden */
