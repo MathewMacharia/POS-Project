@@ -144,23 +144,35 @@ export function toDbExpense(e: Partial<Expense>) {
 }
 
 export function mapAuditLog(a: any): AuditLog {
+  let details = a.details || "";
+  let restorePayload: string | undefined;
+  if (details.includes(" |__RESTORE_PAYLOAD__| ")) {
+    const parts = details.split(" |__RESTORE_PAYLOAD__| ");
+    details = parts[0];
+    restorePayload = parts[1];
+  }
   return {
     id: a.id,
     userId: a.user_id || "system",
     userName: a.user_name,
     action: a.action,
-    details: a.details || "",
-    timestamp: a.timestamp
+    details: details,
+    timestamp: a.timestamp,
+    restorePayload: restorePayload
   };
 }
 
 export function toDbAuditLog(a: AuditLog) {
+  let finalDetails = a.details;
+  if (a.restorePayload) {
+    finalDetails = `${a.details} |__RESTORE_PAYLOAD__| ${a.restorePayload}`;
+  }
   return {
     id: a.id || undefined,
     user_id: a.userId === "anonymous" || a.userId === "system" ? null : a.userId,
     user_name: a.userName,
     action: a.action,
-    details: a.details,
+    details: finalDetails,
     timestamp: a.timestamp
   };
 }

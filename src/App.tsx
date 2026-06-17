@@ -29,7 +29,9 @@ import {
   Wifi,
   ShoppingBag,
   Key,
-  FileText
+  FileText,
+  AlertTriangle,
+  RotateCcw
 } from 'lucide-react';
 
 // Imports from components & seed data
@@ -781,6 +783,210 @@ export default function App() {
     setAuditLogs([freshLog]);
   };
 
+  // Clear specific section data action (Admin override only)
+  const handleClearSection = async (section: 'sales' | 'products' | 'expenses' | 'suppliers' | 'audit') => {
+    let backupData: any = null;
+    let label = '';
+    
+    if (section === 'sales') {
+      backupData = { sales, stockLogs };
+      label = 'Sales & Stock Logs';
+    } else if (section === 'products') {
+      backupData = { products };
+      label = 'Products Catalog';
+    } else if (section === 'expenses') {
+      backupData = { expenses };
+      label = 'Expenses Ledger';
+    } else if (section === 'suppliers') {
+      backupData = { suppliers };
+      label = 'Suppliers Registry';
+    } else if (section === 'audit') {
+      backupData = { auditLogs };
+      label = 'Security Audit Logs';
+    }
+
+    const restorePayload = JSON.stringify({ section, data: backupData });
+
+    try {
+      // 1. Wipe local state & local cache
+      if (section === 'sales') {
+        setSales([]);
+        setStockLogs([]);
+        setLocalCache('sales', []);
+        setLocalCache('stock_logs', []);
+        
+        // Deletions online / offline queue
+        if (navigator.onLine) {
+          await supabase.from('sales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+          await supabase.from('stock_logs').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        } else {
+          sales.forEach(s => queueAction('delete', 'sales', null, s.id));
+          stockLogs.forEach(sl => queueAction('delete', 'stock_logs', null, sl.id));
+        }
+      } else if (section === 'products') {
+        setProducts([]);
+        setLocalCache('products', []);
+        if (navigator.onLine) {
+          await supabase.from('products').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        } else {
+          products.forEach(p => queueAction('delete', 'products', null, p.id));
+        }
+      } else if (section === 'expenses') {
+        setExpenses([]);
+        setLocalCache('expenses', []);
+        if (navigator.onLine) {
+          await supabase.from('expenses').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        } else {
+          expenses.forEach(e => queueAction('delete', 'expenses', null, e.id));
+        }
+      } else if (section === 'suppliers') {
+        setSuppliers([]);
+        setLocalCache('suppliers', []);
+        if (navigator.onLine) {
+          await supabase.from('suppliers').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        } else {
+          suppliers.forEach(s => queueAction('delete', 'suppliers', null, s.id));
+        }
+      } else if (section === 'audit') {
+        setAuditLogs([]);
+        setLocalCache('audit_logs', []);
+        if (navigator.onLine) {
+          await supabase.from('audit_logs').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        } else {
+          auditLogs.forEach(a => queueAction('delete', 'audit_logs', null, a.id));
+        }
+      }
+
+      // 2. Add an audit log entry for the purge that includes the restorePayload
+      const freshLog: AuditLog = {
+        id: crypto.randomUUID(),
+        userId: currentUser?.id || 'admin',
+        userName: currentUser?.fullName || 'Admin',
+        action: 'Section Purged',
+        details: `${label} wiped clean by administrator override. Version backup created.`,
+        timestamp: new Date().toISOString(),
+        restorePayload: restorePayload
+      };
+
+      setAuditLogs(prev => [...prev.filter(l => section === 'audit' ? false : true), freshLog]);
+      setLocalCache('audit_logs', [...getLocalCache('audit_logs').filter(() => section !== 'audit'), toDbAuditLog(freshLog)]);
+      queueAction('insert', 'audit_logs', toDbAuditLog(freshLog));
+
+      alert(`${label} cleared successfully!`);
+    } catch (err: any) {
+      alert(`Failed to clear ${label}: ` + err.message);
+    }
+  };
+
+  // Restore specific section data action (Admin override only)
+  const handleRestoreWipedData = async (payloadStr: string) => {
+    try {
+      const { section, data } = JSON.parse(payloadStr);
+      if (section === 'sales') {
+        const restoredSales = data.sales || [];
+        const restoredLogs = data.stockLogs || [];
+        setSales(prev => {
+          const merged = [...prev];
+          restoredSales.forEach((s: Sale) => {
+            if (!merged.some(x => x.id === s.id)) merged.push(s);
+          });
+          return merged;
+        });
+        setStockLogs(prev => {
+          const merged = [...prev];
+          restoredLogs.forEach((sl: StockLog) => {
+            if (!merged.some(x => x.id === sl.id)) merged.push(sl);
+          });
+          return merged;
+        });
+        
+        const updatedSalesCache = getLocalCache('sales');
+        restoredSales.forEach((s: Sale) => {
+          if (!updatedSalesCache.some(x => x.id === s.id)) updatedSalesCache.push(toDbSale(s));
+        });
+        setLocalCache('sales', updatedSalesCache);
+
+        const updatedLogsCache = getLocalCache('stock_logs');
+        restoredLogs.forEach((sl: StockLog) => {
+          if (!updatedLogsCache.some(x => x.id === sl.id)) updatedLogsCache.push(toDbStockLog(sl));
+        });
+        setLocalCache('stock_logs', updatedLogsCache);
+
+        restoredSales.forEach((s: Sale) => queueAction('insert', 'sales', toDbSale(s)));
+        restoredLogs.forEach((sl: StockLog) => queueAction('insert', 'stock_logs', toDbStockLog(sl)));
+
+      } else if (section === 'products') {
+        const restoredProducts = data.products || [];
+        setProducts(prev => {
+          const merged = [...prev];
+          restoredProducts.forEach((p: Product) => {
+            if (!merged.some(x => x.id === p.id)) merged.push(p);
+          });
+          return merged;
+        });
+        const updatedCache = getLocalCache('products');
+        restoredProducts.forEach((p: Product) => {
+          if (!updatedCache.some(x => x.id === p.id)) updatedCache.push(toDbProduct(p));
+        });
+        setLocalCache('products', updatedCache);
+        restoredProducts.forEach((p: Product) => queueAction('insert', 'products', toDbProduct(p)));
+
+      } else if (section === 'expenses') {
+        const restoredExpenses = data.expenses || [];
+        setExpenses(prev => {
+          const merged = [...prev];
+          restoredExpenses.forEach((e: Expense) => {
+            if (!merged.some(x => x.id === e.id)) merged.push(e);
+          });
+          return merged;
+        });
+        const updatedCache = getLocalCache('expenses');
+        restoredExpenses.forEach((e: Expense) => {
+          if (!updatedCache.some(x => x.id === e.id)) updatedCache.push(toDbExpense(e));
+        });
+        setLocalCache('expenses', updatedCache);
+        restoredExpenses.forEach((e: Expense) => queueAction('insert', 'expenses', toDbExpense(e)));
+
+      } else if (section === 'suppliers') {
+        const restoredSuppliers = data.suppliers || [];
+        setSuppliers(prev => {
+          const merged = [...prev];
+          restoredSuppliers.forEach((s: Supplier) => {
+            if (!merged.some(x => x.id === s.id)) merged.push(s);
+          });
+          return merged;
+        });
+        const updatedCache = getLocalCache('suppliers');
+        restoredSuppliers.forEach((s: Supplier) => {
+          if (!updatedCache.some(x => x.id === s.id)) updatedCache.push(toDbSupplier(s));
+        });
+        setLocalCache('suppliers', updatedCache);
+        restoredSuppliers.forEach((s: Supplier) => queueAction('insert', 'suppliers', toDbSupplier(s)));
+
+      } else if (section === 'audit') {
+        const restoredAudits = data.auditLogs || [];
+        setAuditLogs(prev => {
+          const merged = [...prev];
+          restoredAudits.forEach((a: AuditLog) => {
+            if (!merged.some(x => x.id === a.id)) merged.push(a);
+          });
+          return merged;
+        });
+        const updatedCache = getLocalCache('audit_logs');
+        restoredAudits.forEach((a: AuditLog) => {
+          if (!updatedCache.some(x => x.id === a.id)) updatedCache.push(toDbAuditLog(a));
+        });
+        setLocalCache('audit_logs', updatedCache);
+        restoredAudits.forEach((a: AuditLog) => queueAction('insert', 'audit_logs', toDbAuditLog(a)));
+      }
+
+      addAuditLog('Restore Wiped Data', `Restored cleared database snapshot for ${section} section.`);
+      alert('Data restored successfully!');
+    } catch (err: any) {
+      alert('Failed to restore wiped data: ' + err.message);
+    }
+  };
+
   // Save Shop Details
   const handleModifySettings = (newSettingsData: ShopSettings) => {
     setShopSettings(newSettingsData);
@@ -1339,6 +1545,7 @@ export default function App() {
               logs={auditLogs}
               onClearLogs={handleClearAuditHistory}
               currentUserRole={currentUser.role}
+              onRestoreWipedData={handleRestoreWipedData}
             />
           )}
 
@@ -1472,6 +1679,111 @@ export default function App() {
                   </div>
                 </div>
               </div>
+
+              {/* Danger Zone: Purge Shop Databases (Admin Only) */}
+              {currentUser?.role === 'admin' && (
+                <div className="bg-red-50/5 dark:bg-red-950/5 border border-red-200 dark:border-red-900/60 p-5 rounded-2xl" id="settings-danger-zone">
+                  <h3 className="font-extrabold text-red-600 dark:text-red-400 text-base flex items-center gap-1.5 pb-3 border-b border-red-200/40 dark:border-red-900/40 mb-4">
+                    <AlertTriangle className="w-4.5 h-4.5" />
+                    Danger Zone: Purge Shop Databases
+                  </h3>
+                  <p className="text-zinc-500 dark:text-zinc-400 text-xs mb-4 leading-normal">
+                    Administrators have the capability to selectively purge database tables of specific sections of the app (e.g. before handing over the app to a new shop owner). Wiping a section automatically records an recovery trace log in the <strong className="text-zinc-800 dark:text-zinc-200">Security Audit Trails</strong> which allows you to restore the version you cleared.
+                  </p>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                    {/* Clear Sales */}
+                    <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl flex flex-col justify-between gap-3">
+                      <div>
+                        <h4 className="font-bold text-zinc-900 dark:text-white text-xs">Sales &amp; Stock Movement</h4>
+                        <p className="text-zinc-400 text-[10px] leading-tight mt-1">Wipes all completed checkout sales registers and stock movement traces. Resets Dashboard metrics.</p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (window.confirm("WARNING: Are you sure you want to delete ALL Sales and Stock Logs? This action will generate a restorable checkpoint.")) {
+                            handleClearSection('sales');
+                          }
+                        }}
+                        className="w-full py-2 bg-red-600/10 hover:bg-red-600 hover:text-white text-red-600 font-bold rounded-lg text-[11px] transition text-center cursor-pointer"
+                      >
+                        Clear Sales Data
+                      </button>
+                    </div>
+
+                    {/* Clear Products */}
+                    <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl flex flex-col justify-between gap-3">
+                      <div>
+                        <h4 className="font-bold text-zinc-900 dark:text-white text-xs">Products Catalog</h4>
+                        <p className="text-zinc-400 text-[10px] leading-tight mt-1">Permanently deletes all registered product entries on shelf inventory.</p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (window.confirm("WARNING: Are you sure you want to delete ALL Products from shelves? This action will generate a restorable checkpoint.")) {
+                            handleClearSection('products');
+                          }
+                        }}
+                        className="w-full py-2 bg-red-600/10 hover:bg-red-600 hover:text-white text-red-600 font-bold rounded-lg text-[11px] transition text-center cursor-pointer"
+                      >
+                        Clear Catalog
+                      </button>
+                    </div>
+
+                    {/* Clear Expenses */}
+                    <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl flex flex-col justify-between gap-3">
+                      <div>
+                        <h4 className="font-bold text-zinc-900 dark:text-white text-xs">Expenses Ledger</h4>
+                        <p className="text-zinc-400 text-[10px] leading-tight mt-1">Clears all recorded shop overhead expenses and payouts logs.</p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (window.confirm("WARNING: Are you sure you want to delete ALL recorded expenses? This action will generate a restorable checkpoint.")) {
+                            handleClearSection('expenses');
+                          }
+                        }}
+                        className="w-full py-2 bg-red-600/10 hover:bg-red-600 hover:text-white text-red-600 font-bold rounded-lg text-[11px] transition text-center cursor-pointer"
+                      >
+                        Clear Expenses
+                      </button>
+                    </div>
+
+                    {/* Clear Suppliers */}
+                    <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl flex flex-col justify-between gap-3">
+                      <div>
+                        <h4 className="font-bold text-zinc-900 dark:text-white text-xs">Suppliers Directory</h4>
+                        <p className="text-zinc-400 text-[10px] leading-tight mt-1">Clears the registered listing of partner suppliers and distributors.</p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (window.confirm("WARNING: Are you sure you want to delete ALL suppliers? This action will generate a restorable checkpoint.")) {
+                            handleClearSection('suppliers');
+                          }
+                        }}
+                        className="w-full py-2 bg-red-600/10 hover:bg-red-600 hover:text-white text-red-600 font-bold rounded-lg text-[11px] transition text-center cursor-pointer"
+                      >
+                        Clear Suppliers
+                      </button>
+                    </div>
+
+                    {/* Clear Audit Logs */}
+                    <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl flex flex-col justify-between gap-3">
+                      <div>
+                        <h4 className="font-bold text-zinc-900 dark:text-white text-xs">Security Audit Logs</h4>
+                        <p className="text-zinc-400 text-[10px] leading-tight mt-1">Purger of audit trace histories. This operation is itself logged with a recovery point.</p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (window.confirm("WARNING: Are you sure you want to delete ALL security audit logs? This action will generate a restorable checkpoint.")) {
+                            handleClearSection('audit');
+                          }
+                        }}
+                        className="w-full py-2 bg-red-600/10 hover:bg-red-600 hover:text-white text-red-600 font-bold rounded-lg text-[11px] transition text-center cursor-pointer"
+                      >
+                        Clear Audit Trail
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

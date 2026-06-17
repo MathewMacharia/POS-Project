@@ -6,12 +6,14 @@ interface AuditLogsProps {
   logs: AuditLog[];
   onClearLogs: () => void;
   currentUserRole: 'admin' | 'cashier';
+  onRestoreWipedData: (payload: string) => void;
 }
 
 export default function AuditLogs({
   logs,
   onClearLogs,
-  currentUserRole
+  currentUserRole,
+  onRestoreWipedData
 }: AuditLogsProps) {
   const [search, setSearch] = useState('');
 
@@ -78,7 +80,7 @@ export default function AuditLogs({
                 <th className="py-3.5 px-4">Operator</th>
                 <th className="py-3.5 px-4">System action</th>
                 <th className="py-3.5 px-4">Trace Details</th>
-                <th className="py-3.5 px-4 text-center">Status badge</th>
+                <th className="py-3.5 px-4 text-center">Actions &amp; Badge</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -115,11 +117,26 @@ export default function AuditLogs({
                       {log.details}
                     </td>
 
-                    {/* Immutable Badge status */}
+                    {/* Immutable Badge status & Restore Option */}
                     <td className="py-3 px-4 text-center">
-                      <span className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 text-emerald-800 dark:text-emerald-400 font-mono text-[9px] font-extrabold uppercase px-2 py-0.5 rounded tracking-wider">
-                        SECURE LOG
-                      </span>
+                      <div className="flex flex-col items-center gap-2">
+                        <span className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 text-emerald-800 dark:text-emerald-400 font-mono text-[9px] font-extrabold uppercase px-2 py-0.5 rounded tracking-wider">
+                          SECURE LOG
+                        </span>
+                        {log.restorePayload && currentUserRole === 'admin' && (
+                          <button
+                            onClick={() => {
+                              const confirmRestore = window.confirm("Je, ungependa kurejesha data hii iliyofutwa? Restore this wiped data version? Existing records will be merged.");
+                              if (confirmRestore && log.restorePayload) {
+                                onRestoreWipedData(log.restorePayload);
+                              }
+                            }}
+                            className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-md text-[10px] transition cursor-pointer"
+                          >
+                            Restore version
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))

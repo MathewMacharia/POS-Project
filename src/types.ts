@@ -82,6 +82,7 @@ export interface AuditLog {
   action: string;
   details: string;
   timestamp: string;
+  restorePayload?: string;
 }
 
 export interface ShopSettings {
