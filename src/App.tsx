@@ -31,7 +31,8 @@ import {
   Key,
   FileText,
   AlertTriangle,
-  RotateCcw
+  RotateCcw,
+  Save
 } from 'lucide-react';
 
 // Imports from components & seed data
@@ -118,6 +119,10 @@ export default function App() {
     const saved = localStorage.getItem('dufuka_shop_settings');
     return saved ? JSON.parse(saved) : DEFAULT_SHOP_SETTINGS;
   });
+  const [formSettings, setFormSettings] = useState<ShopSettings>(shopSettings);
+  useEffect(() => {
+    setFormSettings(shopSettings);
+  }, [shopSettings]);
   const [users, setUsers] = useState<User[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
 
@@ -1025,6 +1030,7 @@ export default function App() {
   // Save Shop Details
   const handleModifySettings = (newSettingsData: ShopSettings) => {
     setShopSettings(newSettingsData);
+    localStorage.setItem('dufuka_shop_settings', JSON.stringify(newSettingsData));
     addAuditLog('Settings Modified', 'Customized shop information details, tax register and receipt headers.');
   };
 
@@ -1598,6 +1604,7 @@ export default function App() {
                 <form 
                   onSubmit={(e) => {
                     e.preventDefault();
+                    handleModifySettings(formSettings);
                     alert('Shop Settings Saved successfully!');
                   }}
                   className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-semibold"
@@ -1607,8 +1614,8 @@ export default function App() {
                     <input
                       type="text"
                       className="w-full px-3 py-2 bg-zinc-900 dark:bg-zinc-900 text-white dark:text-white border border-zinc-700 rounded-xl focus:ring-1 focus:ring-emerald-500 outline-hidden"
-                      value={shopSettings.shopName}
-                      onChange={(e) => handleModifySettings({ ...shopSettings, shopName: e.target.value })}
+                      value={formSettings.shopName}
+                      onChange={(e) => setFormSettings({ ...formSettings, shopName: e.target.value })}
                     />
                   </div>
                   <div>
@@ -1616,8 +1623,8 @@ export default function App() {
                     <input
                       type="text"
                       className="w-full px-3 py-2 bg-zinc-900 dark:bg-zinc-900 text-white dark:text-white border border-zinc-700 rounded-xl focus:ring-1 focus:ring-emerald-500 outline-hidden font-mono"
-                      value={shopSettings.taxRegistrationNumber}
-                      onChange={(e) => handleModifySettings({ ...shopSettings, taxRegistrationNumber: e.target.value })}
+                      value={formSettings.taxRegistrationNumber}
+                      onChange={(e) => setFormSettings({ ...formSettings, taxRegistrationNumber: e.target.value })}
                     />
                   </div>
                   <div>
@@ -1625,8 +1632,8 @@ export default function App() {
                     <input
                       type="text"
                       className="w-full px-3 py-2 bg-zinc-900 dark:bg-zinc-900 text-white dark:text-white border border-zinc-700 rounded-xl focus:ring-1 focus:ring-emerald-500 outline-hidden"
-                      value={shopSettings.shopAddress}
-                      onChange={(e) => handleModifySettings({ ...shopSettings, shopAddress: e.target.value })}
+                      value={formSettings.shopAddress}
+                      onChange={(e) => setFormSettings({ ...formSettings, shopAddress: e.target.value })}
                     />
                   </div>
                   <div>
@@ -1634,8 +1641,8 @@ export default function App() {
                     <input
                       type="text"
                       className="w-full px-3 py-2 bg-zinc-900 dark:bg-zinc-900 text-white dark:text-white border border-zinc-700 rounded-xl focus:ring-1 focus:ring-emerald-500 outline-hidden"
-                      value={shopSettings.shopPhone}
-                      onChange={(e) => handleModifySettings({ ...shopSettings, shopPhone: e.target.value })}
+                      value={formSettings.shopPhone}
+                      onChange={(e) => setFormSettings({ ...formSettings, shopPhone: e.target.value })}
                     />
                   </div>
                   <div>
@@ -1643,8 +1650,8 @@ export default function App() {
                     <input
                       type="text"
                       className="w-full px-3 py-2 bg-zinc-900 dark:bg-zinc-900 text-white dark:text-white border border-zinc-700 rounded-xl focus:ring-1 focus:ring-emerald-500 outline-hidden font-mono"
-                      value={shopSettings.tillNumber}
-                      onChange={(e) => handleModifySettings({ ...shopSettings, tillNumber: e.target.value })}
+                      value={formSettings.tillNumber}
+                      onChange={(e) => setFormSettings({ ...formSettings, tillNumber: e.target.value })}
                     />
                   </div>
                   <div>
@@ -1652,9 +1659,19 @@ export default function App() {
                     <input
                       type="text"
                       className="w-full px-3 py-2 bg-zinc-900 dark:bg-zinc-900 text-white dark:text-white border border-zinc-700 rounded-xl focus:ring-1 focus:ring-emerald-500 outline-hidden font-mono"
-                      value={shopSettings.paybillNumber}
-                      onChange={(e) => handleModifySettings({ ...shopSettings, paybillNumber: e.target.value })}
+                      value={formSettings.paybillNumber}
+                      onChange={(e) => setFormSettings({ ...formSettings, paybillNumber: e.target.value })}
                     />
+                  </div>
+                  
+                  <div className="md:col-span-2 flex justify-end pt-2">
+                    <button
+                      type="submit"
+                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm transition"
+                    >
+                      <Save className="w-4 h-4" />
+                      Save Shop Settings
+                    </button>
                   </div>
                 </form>
               </div>
