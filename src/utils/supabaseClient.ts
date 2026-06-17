@@ -433,8 +433,10 @@ export async function triggerSync(onSyncSuccess?: () => void) {
   saveSyncQueue(updatedQueue);
   isSyncing = false;
 
-  if (!hasNetworkError && remainingQueue.length === 0 && onSyncSuccess) {
-    onSyncSuccess();
+  if (!hasNetworkError && remainingQueue.length === 0) {
+    if (onSyncSuccess) {
+      onSyncSuccess();
+    }
   }
 }
 
