@@ -1504,6 +1504,7 @@ export default function App() {
               onSellProductQuick={() => setActiveTab('pos')}
               onAddProductQuick={() => setActiveTab('inventory')}
               currentUserRole={currentUser.role}
+              shopName={shopSettings.shopName}
             />
           )}
 

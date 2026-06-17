@@ -24,6 +24,7 @@ interface DashboardProps {
   onAddProductQuick: () => void;
   onSellProductQuick: () => void;
   currentUserRole: 'admin' | 'cashier';
+  shopName?: string;
 }
 
 export default function Dashboard({
@@ -32,7 +33,8 @@ export default function Dashboard({
   onNavigate,
   onAddProductQuick,
   onSellProductQuick,
-  currentUserRole
+  currentUserRole,
+  shopName = 'Dufuka Shop'
 }: DashboardProps) {
   // Stats calculations
   const today = new Date();
@@ -144,7 +146,7 @@ export default function Dashboard({
           <div>
             <h1 className="text-2xl md:text-3xl font-bold font-sans tracking-tight">Karibu Tena! Welcome Back</h1>
             <p className="text-emerald-100 mt-1 max-w-xl text-sm leading-relaxed">
-              Mshiriki Super Dufuka POS is running successfully offline-first. Manage your retail products, record sales via Cash, M-Pesa, or Bank, and view real-time operations stats.
+              {shopName} POS is running successfully offline-first. Manage your retail products, record sales via Cash, M-Pesa, or Bank, and view real-time operations stats.
             </p>
           </div>
           <div className="flex gap-2">
