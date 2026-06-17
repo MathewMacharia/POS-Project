@@ -246,7 +246,7 @@ export default function POS({
   };
 
   // Complete Payment Action
-  const finalizeSale = () => {
+  const finalizeSale = async () => {
     if (cart.length === 0) return;
 
     const paidVal = parseFloat(paidAmount) || 0;
@@ -271,7 +271,7 @@ export default function POS({
     });
 
     if (autoSaveToDb) {
-      const retSale = onCompleteSale(
+      const retSale = await onCompleteSale(
         cart,
         paymentMethod,
         refCode,
@@ -279,8 +279,10 @@ export default function POS({
         changeFinal,
         discountVal
       );
-      setCompletedSale(retSale);
-      setIsReceiptSaved(true);
+      if (retSale) {
+        setCompletedSale(retSale);
+        setIsReceiptSaved(true);
+      }
       // Reset Cart
       setCart([]);
       setDiscountInput('0');
@@ -320,19 +322,21 @@ export default function POS({
   };
 
   // Save uncommitted Sale to active database
-  const handleSaveToDatabase = () => {
+  const handleSaveToDatabase = async () => {
     if (isReceiptSaved || !pendingCheckoutParams) return;
     const { cartItems, paymentMethod, refCode, paidVal, changeVal } = pendingCheckoutParams;
 
-    const retSale = onCompleteSale(
+    const retSale = await onCompleteSale(
       cartItems,
       paymentMethod,
       refCode,
       paidVal,
       changeVal
     );
-    setCompletedSale(retSale);
-    setIsReceiptSaved(true);
+    if (retSale) {
+      setCompletedSale(retSale);
+      setIsReceiptSaved(true);
+    }
     // Clear active checkout cart now that records are persisted
     setCart([]);
   };

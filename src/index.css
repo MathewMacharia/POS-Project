@@ -1,1 +1,51 @@
 @import "tailwindcss";
+
+@media print {
+  /* Hide all non-printable elements */
+  body * {
+    visibility: hidden;
+  }
+  
+  /* Make only the receipt modal contents visible */
+  #printable-thermal-receipt,
+  #printable-thermal-receipt * {
+    visibility: visible;
+  }
+  
+  /* Layout configuration for the thermal receipt on print */
+  #printable-thermal-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm; /* Standard 3-inch thermal paper width */
+    margin: 0 auto !important;
+    padding: 10px !important;
+    background: white !important;
+    color: black !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+  
+  /* Ensure the modals and layout backdrops are transparent/hidden */
+  #receipt-overlay {
+    background: transparent !important;
+    position: absolute !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    inset: 0 !important;
+  }
+  
+  #receipt-modal-card {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+  }
+
+  /* Utility classes to hide standard UI elements */
+  .print\:hidden {
+    display: none !important;
+  }
+}
