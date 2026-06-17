@@ -173,7 +173,7 @@ export default function Stocks({
               </div>
               <div>
                 <span className="text-[10px] font-bold text-zinc-400 block uppercase">EXPIRED PRODUCTS</span>
-                <span className="text-lg font-bold font-sans text-red-650 dark:text-red-450">{segmentedProducts.expired.length} item(s)</span>
+                <span className="text-lg font-bold font-sans text-red-600 dark:text-red-400">{segmentedProducts.expired.length} item(s)</span>
               </div>
             </div>
 
@@ -408,7 +408,7 @@ export default function Stocks({
                           ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-400'
                           : log.type === 'sale'
                             ? 'bg-blue-100 dark:bg-blue-950/40 text-blue-800 dark:text-blue-400'
-                            : 'bg-red-105 dark:bg-red-950/40 text-red-800 dark:text-red-400'
+                            : 'bg-red-100 dark:bg-red-950/40 text-red-800 dark:text-red-400'
                       }`}>
                         {log.type}
                       </span>
@@ -509,7 +509,7 @@ export default function Stocks({
       {isDiscardOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl max-w-sm w-full p-5 shadow-2xl">
-            <h3 className="font-bold text-red-650 dark:text-red-400 pb-2 border-b border-zinc-105 dark:border-zinc-800 text-center flex items-center justify-center gap-1.5 text-sm">
+            <h3 className="font-bold text-red-600 dark:text-red-400 pb-2 border-b border-zinc-105 dark:border-zinc-800 text-center flex items-center justify-center gap-1.5 text-sm">
               <Trash2 className="w-4.5 h-4.5" />
               Confirm Food/Medicine Shelf Discard
             </h3>
@@ -520,7 +520,7 @@ export default function Stocks({
               </p>
 
               <div>
-                <label className="text-zinc-550 block mb-1">Reason for shelf removal</label>
+                <label className="text-zinc-555 block mb-1">Reason for shelf removal</label>
                 <input
                   type="text"
                   required
@@ -541,7 +541,7 @@ export default function Stocks({
                 </button>
                 <button
                   type="submit"
-                  className="w-1/2 py-2.5 bg-red-650 hover:bg-red-700 text-white rounded-lg shadow-xs"
+                  className="w-1/2 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg shadow-xs"
                 >
                   Confirm Discard
                 </button>

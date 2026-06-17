@@ -31,8 +31,9 @@ const PRESET_CATEGORIES = [
 ];
 
 export default function Expenses({ expenses, onAddExpense, onDeleteExpense, currentUser }: ExpensesProps) {
-  // System local date preset
-  const todayStr = '2026-06-09';
+  // System local date dynamically generated
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
   // State
   const [categories, setCategories] = useState<string[]>(() => {
@@ -137,17 +138,19 @@ export default function Expenses({ expenses, onAddExpense, onDeleteExpense, curr
       if (filterPeriod === 'daily') {
         matchesPeriod = exp.date === todayStr;
       } else if (filterPeriod === 'monthly') {
-        matchesPeriod = exp.date.startsWith('2026-06');
+        const currentMonthPrefix = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+        matchesPeriod = exp.date.startsWith(currentMonthPrefix);
       }
 
       return matchesSearch && matchesCategory && matchesPeriod;
     }).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  }, [expenses, searchTerm, filterCategory, filterPeriod, todayStr]);
+  }, [expenses, searchTerm, filterCategory, filterPeriod, todayStr, today]);
 
   // High-Level Math Indicators
   const metrics = useMemo(() => {
     const todayExpenses = expenses.filter(e => e.date === todayStr);
-    const thisMonthExpenses = expenses.filter(e => e.date.startsWith('2026-06'));
+    const currentMonthPrefix = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    const thisMonthExpenses = expenses.filter(e => e.date.startsWith(currentMonthPrefix));
 
     const dailyTotal = todayExpenses.reduce((sum, e) => sum + e.amount, 0);
     const monthlyTotal = thisMonthExpenses.reduce((sum, e) => sum + e.amount, 0);
@@ -229,7 +232,7 @@ export default function Expenses({ expenses, onAddExpense, onDeleteExpense, curr
             <TrendingDown className="w-5 h-5" />
           </div>
           <div>
-            <span className="text-[10px] text-zinc-500 block font-bold uppercase tracking-wider">Today's Expenses (June 9)</span>
+            <span className="text-[10px] text-zinc-500 block font-bold uppercase tracking-wider">Today's Expenses</span>
             <span className="text-lg font-mono font-extrabold text-zinc-900 dark:text-zinc-100">{KES(metrics.dailyTotal)}</span>
           </div>
         </div>
@@ -239,7 +242,7 @@ export default function Expenses({ expenses, onAddExpense, onDeleteExpense, curr
             <Calendar className="w-5 h-5" />
           </div>
           <div>
-            <span className="text-[10px] text-zinc-500 block font-bold uppercase tracking-wider">This Month Total (June 2026)</span>
+            <span className="text-[10px] text-zinc-500 block font-bold uppercase tracking-wider">This Month Total</span>
             <span className="text-lg font-mono font-extrabold text-zinc-900 dark:text-zinc-100">{KES(metrics.monthlyTotal)}</span>
           </div>
         </div>
@@ -338,7 +341,7 @@ export default function Expenses({ expenses, onAddExpense, onDeleteExpense, curr
 
               <button
                 type="submit"
-                className="w-full py-2.5 bg-red-650 hover:bg-red-700 text-white font-bold rounded-lg tracking-wide uppercase shadow-xs hover:shadow-md transition duration-150 flex items-center justify-center gap-1 cursor-pointer"
+                className="w-full py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg tracking-wide uppercase shadow-xs hover:shadow-md transition duration-150 flex items-center justify-center gap-1 cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 Commit Expense Entry
@@ -387,7 +390,7 @@ export default function Expenses({ expenses, onAddExpense, onDeleteExpense, curr
                   <button
                     type="button"
                     onClick={() => handleDeleteCategory(cat)}
-                    className="text-zinc-400 hover:text-red-650 p-1 rounded-sm hover:bg-zinc-100 dark:hover:bg-zinc-750 cursor-pointer"
+                    className="text-zinc-400 hover:text-red-600 p-1 rounded-sm hover:bg-zinc-100 dark:hover:bg-zinc-750 cursor-pointer"
                     title="Remove category"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -502,7 +505,7 @@ export default function Expenses({ expenses, onAddExpense, onDeleteExpense, curr
                             )}
                           </div>
                         </td>
-                        <td className="py-3.5 px-4 font-mono text-right text-red-650 dark:text-red-400 font-bold whitespace-nowrap">
+                        <td className="py-3.5 px-4 font-mono text-right text-red-600 dark:text-red-400 font-bold whitespace-nowrap">
                           {KES(exp.amount)}
                         </td>
                         <td className="py-3.5 px-4 text-[10.5px] text-zinc-500 uppercase font-semibold whitespace-nowrap">
