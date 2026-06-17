@@ -314,6 +314,21 @@ export function queueAction(action: 'insert' | 'update' | 'delete', table: strin
   triggerSync();
 }
 
+export function queueActions(actions: { action: 'insert' | 'update' | 'delete', table: string, payload: any, targetId?: string }[]) {
+  const queue = getSyncQueue();
+  actions.forEach(act => {
+    queue.push({
+      id: `sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      action: act.action,
+      table: act.table,
+      payload: act.payload,
+      targetId: act.targetId
+    });
+  });
+  saveSyncQueue(queue);
+  triggerSync();
+}
+
 let isSyncing = false;
 
 function isTransientError(error: any): boolean {
@@ -395,7 +410,13 @@ export async function triggerSync(onSyncSuccess?: () => void) {
     }
   }
 
-  saveSyncQueue(remainingQueue);
+  // Merge remaining items and keep items added during async processing
+  const latestQueue = getSyncQueue();
+  const updatedQueue = latestQueue.filter(latestItem => 
+    remainingQueue.some(remItem => remItem.id === latestItem.id) ||
+    !queue.some(processedItem => processedItem.id === latestItem.id)
+  );
+  saveSyncQueue(updatedQueue);
   isSyncing = false;
 
   if (!hasNetworkError && remainingQueue.length === 0 && onSyncSuccess) {

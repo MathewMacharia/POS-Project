@@ -76,7 +76,7 @@ import {
   mapSupplier, toDbSupplier,
   mapStockLog, toDbStockLog,
   getLocalCache, setLocalCache,
-  queueAction, triggerSync, mergeRemoteWithSyncQueue
+  queueAction, queueActions, triggerSync, mergeRemoteWithSyncQueue
 } from './utils/supabaseClient';
 
 function NairobiClock() {
@@ -446,28 +446,33 @@ export default function App() {
     };
 
     try {
+      const dbOps: { action: 'insert' | 'update' | 'delete', table: string, payload: any, targetId?: string }[] = [];
+
       // 1. Save Sale locally
       setSales(prev => {
         const updated = [...prev, newSale];
         setLocalCache('sales', updated.map(toDbSale));
         return updated;
       });
-      queueAction('insert', 'sales', toDbSale(newSale));
+      dbOps.push({ action: 'insert', table: 'sales', payload: toDbSale(newSale) });
 
       // 2. Reduce products stock quantities locally and queue updates
-      const updatedProducts = products.map(p => {
-        const cartMatch = cartItems.find(item => item.id === p.id);
-        if (cartMatch) {
-          const newQty = Math.max(0, p.quantityInStock - cartMatch.quantity);
-          queueAction('update', 'products', { quantity_in_stock: newQty }, p.id);
-          return { ...p, quantityInStock: newQty };
-        }
-        return p;
+      setProducts(prevProducts => {
+        const updated = prevProducts.map(p => {
+          const cartMatch = cartItems.find(item => item.id === p.id);
+          if (cartMatch) {
+            const newQty = Math.max(0, p.quantityInStock - cartMatch.quantity);
+            dbOps.push({ action: 'update', table: 'products', payload: { quantity_in_stock: newQty }, targetId: p.id });
+            return { ...p, quantityInStock: newQty };
+          }
+          return p;
+        });
+        setLocalCache('products', updated.map(toDbProduct));
+        return updated;
       });
-      setProducts(updatedProducts);
-      setLocalCache('products', updatedProducts.map(toDbProduct));
 
       // 3. Append to stock movement logs locally and queue
+      const createdLogs: StockLog[] = [];
       for (const item of cartItems) {
         const logId = crypto.randomUUID();
         const newStockLog: StockLog = {
@@ -480,14 +485,18 @@ export default function App() {
           operatorName: currentUser?.fullName || 'System',
           notes: `Sold via checkout receipt ${receiptNo}`
         };
-
-        setStockLogs(prev => {
-          const updated = [...prev, newStockLog];
-          setLocalCache('stock_logs', updated.map(toDbStockLog));
-          return updated;
-        });
-        queueAction('insert', 'stock_logs', toDbStockLog(newStockLog));
+        createdLogs.push(newStockLog);
+        dbOps.push({ action: 'insert', table: 'stock_logs', payload: toDbStockLog(newStockLog) });
       }
+
+      setStockLogs(prev => {
+        const updated = [...prev, ...createdLogs];
+        setLocalCache('stock_logs', updated.map(toDbStockLog));
+        return updated;
+      });
+
+      // Batch queue all database actions to prevent sync queue overwrite race conditions
+      queueActions(dbOps);
 
       // 4. Attach Security Audit Trail
       addAuditLog('Complete Sale', `Completed Checkout receipt ${receiptNo} worth KES ${subtotal} via ${paymentMethod}.`);
