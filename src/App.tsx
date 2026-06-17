@@ -76,7 +76,8 @@ import {
   mapSupplier, toDbSupplier,
   mapStockLog, toDbStockLog,
   getLocalCache, setLocalCache,
-  queueAction, queueActions, triggerSync, mergeRemoteWithSyncQueue
+  queueAction, queueActions, triggerSync, mergeRemoteWithSyncQueue,
+  getLocalISOString
 } from './utils/supabaseClient';
 
 function NairobiClock() {
@@ -421,7 +422,7 @@ export default function App() {
     const mm = String(todayObj.getMonth() + 1).padStart(2, '0');
     const dd = String(todayObj.getDate()).padStart(2, '0');
     
-    const todayISO = todayObj.toISOString();
+    const todayISO = getLocalISOString(todayObj);
     const receiptNo = `KPOS-${yyyy}${mm}${dd}-${Math.floor(Math.random() * 900 + 100)}`;
     const saleId = crypto.randomUUID();
 
