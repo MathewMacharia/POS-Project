@@ -153,14 +153,25 @@ export default function App() {
   useEffect(() => {
     async function loadData() {
       // Load from local cache immediately so app starts instantly (even offline)
-      setUsers(getLocalCache('profiles').map(mapProfile));
-      setCategories(getLocalCache('categories').map(mapCategory));
-      setProducts(getLocalCache('products').map(mapProduct));
-      setSales(getLocalCache('sales').map(mapSale));
-      setExpenses(getLocalCache('expenses').map(mapExpense));
-      setAuditLogs(getLocalCache('audit_logs').map(mapAuditLog));
-      setSuppliers(getLocalCache('suppliers').map(mapSupplier));
-      setStockLogs(getLocalCache('stock_logs').map(mapStockLog));
+      const [u, c, p, s, e, al, sup, sl] = await Promise.all([
+        getLocalCache('profiles'),
+        getLocalCache('categories'),
+        getLocalCache('products'),
+        getLocalCache('sales'),
+        getLocalCache('expenses'),
+        getLocalCache('audit_logs'),
+        getLocalCache('suppliers'),
+        getLocalCache('stock_logs')
+      ]);
+
+      setUsers(u.map(mapProfile));
+      setCategories(c.map(mapCategory));
+      setProducts(p.map(mapProduct));
+      setSales(s.map(mapSale));
+      setExpenses(e.map(mapExpense));
+      setAuditLogs(al.map(mapAuditLog));
+      setSuppliers(sup.map(mapSupplier));
+      setStockLogs(sl.map(mapStockLog));
 
       if (!navigator.onLine) return;
 
@@ -295,8 +306,11 @@ export default function App() {
       details,
       timestamp: new Date().toISOString()
     };
-    setAuditLogs(prev => [...prev, newLog]);
-    setLocalCache('audit_logs', [...getLocalCache('audit_logs'), toDbAuditLog(newLog)]);
+    setAuditLogs(prev => {
+      const updated = [...prev, newLog];
+      setLocalCache('audit_logs', updated.map(toDbAuditLog));
+      return updated;
+    });
     queueAction('insert', 'audit_logs', toDbAuditLog(newLog));
   }, [currentUser]);
 
@@ -332,7 +346,7 @@ export default function App() {
       }
 
       if (!profile) {
-        const cachedProfiles = getLocalCache('profiles');
+        const cachedProfiles = await getLocalCache('profiles');
         profile = cachedProfiles.find(p => p.username.toLowerCase() === usernameLower);
       }
 
@@ -366,8 +380,11 @@ export default function App() {
         timestamp: new Date().toISOString()
       };
       
-      setAuditLogs(prev => [...prev, newAuditLog]);
-      setLocalCache('audit_logs', [...getLocalCache('audit_logs'), toDbAuditLog(newAuditLog)]);
+      setAuditLogs(prev => {
+        const updated = [...prev, newAuditLog];
+        setLocalCache('audit_logs', updated.map(toDbAuditLog));
+        return updated;
+      });
       queueAction('insert', 'audit_logs', toDbAuditLog(newAuditLog));
 
       if (foundUser.role === 'admin') {
@@ -430,8 +447,11 @@ export default function App() {
 
     try {
       // 1. Save Sale locally
-      setSales(prev => [...prev, newSale]);
-      setLocalCache('sales', [...getLocalCache('sales'), toDbSale(newSale)]);
+      setSales(prev => {
+        const updated = [...prev, newSale];
+        setLocalCache('sales', updated.map(toDbSale));
+        return updated;
+      });
       queueAction('insert', 'sales', toDbSale(newSale));
 
       // 2. Reduce products stock quantities locally and queue updates
@@ -461,8 +481,11 @@ export default function App() {
           notes: `Sold via checkout receipt ${receiptNo}`
         };
 
-        setStockLogs(prev => [...prev, newStockLog]);
-        setLocalCache('stock_logs', [...getLocalCache('stock_logs'), toDbStockLog(newStockLog)]);
+        setStockLogs(prev => {
+          const updated = [...prev, newStockLog];
+          setLocalCache('stock_logs', updated.map(toDbStockLog));
+          return updated;
+        });
         queueAction('insert', 'stock_logs', toDbStockLog(newStockLog));
       }
 
@@ -487,8 +510,11 @@ export default function App() {
     };
     
     try {
-      setProducts(prev => [...prev, productItem]);
-      setLocalCache('products', [...getLocalCache('products'), toDbProduct(productItem)]);
+      setProducts(prev => {
+        const updated = [...prev, productItem];
+        setLocalCache('products', updated.map(toDbProduct));
+        return updated;
+      });
       queueAction('insert', 'products', toDbProduct(productItem));
 
       // Add stock logarithm for traceability audit
@@ -504,8 +530,11 @@ export default function App() {
         notes: `Registered new catalog item with baseline quantities.`
       };
 
-      setStockLogs(prev => [...prev, newStockLog]);
-      setLocalCache('stock_logs', [...getLocalCache('stock_logs'), toDbStockLog(newStockLog)]);
+      setStockLogs(prev => {
+        const updated = [...prev, newStockLog];
+        setLocalCache('stock_logs', updated.map(toDbStockLog));
+        return updated;
+      });
       queueAction('insert', 'stock_logs', toDbStockLog(newStockLog));
 
       addAuditLog('Create Product', `Registered fresh product ${productItem.name} @ KES ${productItem.sellingPrice}.`);
@@ -516,8 +545,11 @@ export default function App() {
 
   const handleModifyProduct = async (updatedProd: Product) => {
     try {
-      setProducts(prev => prev.map(p => p.id === updatedProd.id ? updatedProd : p));
-      setLocalCache('products', getLocalCache('products').map(p => p.id === updatedProd.id ? toDbProduct(updatedProd) : p));
+      setProducts(prev => {
+        const updated = prev.map(p => p.id === updatedProd.id ? updatedProd : p);
+        setLocalCache('products', updated.map(toDbProduct));
+        return updated;
+      });
       queueAction('update', 'products', toDbProduct(updatedProd), updatedProd.id);
       addAuditLog('Update Product', `Modified product profiles of "${updatedProd.name}".`);
     } catch (err: any) {
@@ -528,8 +560,11 @@ export default function App() {
   const handleDeleteProduct = async (prodId: string) => {
     const prodMatch = products.find(p => p.id === prodId);
     try {
-      setProducts(prev => prev.filter(p => p.id !== prodId));
-      setLocalCache('products', getLocalCache('products').filter(p => p.id !== prodId));
+      setProducts(prev => {
+        const updated = prev.filter(p => p.id !== prodId);
+        setLocalCache('products', updated.map(toDbProduct));
+        return updated;
+      });
       queueAction('delete', 'products', null, prodId);
       addAuditLog('Delete Product', `Permanently deleted catalog key "${prodMatch?.name || prodId}" from shelves.`);
     } catch (err: any) {
@@ -548,8 +583,11 @@ export default function App() {
     };
 
     try {
-      setCategories(prev => [...prev, newCat]);
-      setLocalCache('categories', [...getLocalCache('categories'), { id: categoryId, name: categoryName, is_custom: true, date_added: dateAdded }]);
+      setCategories(prev => {
+        const updated = [...prev, newCat];
+        setLocalCache('categories', updated.map(c => ({ id: c.id, name: c.name, is_custom: c.isCustom, date_added: c.dateAdded })));
+        return updated;
+      });
       queueAction('insert', 'categories', { id: categoryId, name: categoryName, is_custom: true, date_added: dateAdded });
       addAuditLog('Create Category', `Created custom visual category filter "${categoryName}".`);
     } catch (err: any) {
@@ -575,8 +613,11 @@ export default function App() {
           dateAdded: todayISO
         };
 
-        setProducts(prev => [...prev, newProductItem]);
-        setLocalCache('products', [...getLocalCache('products'), toDbProduct(newProductItem)]);
+        setProducts(prev => {
+          const updated = [...prev, newProductItem];
+          setLocalCache('products', updated.map(toDbProduct));
+          return updated;
+        });
         queueAction('insert', 'products', toDbProduct(newProductItem));
 
         const logId = crypto.randomUUID();
@@ -591,8 +632,11 @@ export default function App() {
           notes: `Separate batch restocked (Expiry: ${newProductItem.expiryDate}). ${notes}`
         };
 
-        setStockLogs(prev => [...prev, log]);
-        setLocalCache('stock_logs', [...getLocalCache('stock_logs'), toDbStockLog(log)]);
+        setStockLogs(prev => {
+          const updated = [...prev, log];
+          setLocalCache('stock_logs', updated.map(toDbStockLog));
+          return updated;
+        });
         queueAction('insert', 'stock_logs', toDbStockLog(log));
 
         addAuditLog('Restock New Batch', `Created new product batch line for "${pMatch.name}" with +${restockQty} units expiring on ${newProductItem.expiryDate}.`);
@@ -600,19 +644,16 @@ export default function App() {
         // Standard in-place restock for non-expiring products
         const newQty = pMatch.quantityInStock + restockQty;
 
-        setProducts(prev => prev.map(p => p.id === productId ? {
-          ...p,
-          quantityInStock: newQty,
-          expiryDate: expiryDate ? expiryDate : p.expiryDate
-        } : p));
-
-        const updatedDbProduct = toDbProduct({
-          ...pMatch,
-          quantityInStock: newQty,
-          expiryDate: expiryDate ? expiryDate : pMatch.expiryDate
+        setProducts(prev => {
+          const updated = prev.map(p => p.id === productId ? {
+            ...p,
+            quantityInStock: newQty,
+            expiryDate: expiryDate ? expiryDate : p.expiryDate
+          } : p);
+          setLocalCache('products', updated.map(toDbProduct));
+          return updated;
         });
 
-        setLocalCache('products', getLocalCache('products').map(p => p.id === productId ? updatedDbProduct : p));
         queueAction('update', 'products', { 
           quantity_in_stock: newQty,
           ...(expiryDate ? { expiry_date: expiryDate } : {})
@@ -630,8 +671,11 @@ export default function App() {
           notes: expiryDate ? `${notes} (Expiry: ${expiryDate})` : notes
         };
 
-        setStockLogs(prev => [...prev, log]);
-        setLocalCache('stock_logs', [...getLocalCache('stock_logs'), toDbStockLog(log)]);
+        setStockLogs(prev => {
+          const updated = [...prev, log];
+          setLocalCache('stock_logs', updated.map(toDbStockLog));
+          return updated;
+        });
         queueAction('insert', 'stock_logs', toDbStockLog(log));
 
         addAuditLog('Restock Product', `Incremented inventory of "${pMatch.name}" by +${restockQty} units.${expiryDate ? ` New expiry date keyed in: ${expiryDate}` : ''}`);
@@ -650,8 +694,11 @@ export default function App() {
     const currentQty = pMatch.quantityInStock;
 
     try {
-      setProducts(prev => prev.map(p => p.id === productId ? { ...p, quantityInStock: 0 } : p));
-      setLocalCache('products', getLocalCache('products').map(p => p.id === productId ? { ...p, quantity_in_stock: 0 } : p));
+      setProducts(prev => {
+        const updated = prev.map(p => p.id === productId ? { ...p, quantityInStock: 0 } : p);
+        setLocalCache('products', updated.map(toDbProduct));
+        return updated;
+      });
       queueAction('update', 'products', { quantity_in_stock: 0 }, productId);
 
       const logId = crypto.randomUUID();
@@ -666,8 +713,11 @@ export default function App() {
         notes
       };
 
-      setStockLogs(prev => [...prev, log]);
-      setLocalCache('stock_logs', [...getLocalCache('stock_logs'), toDbStockLog(log)]);
+      setStockLogs(prev => {
+        const updated = [...prev, log];
+        setLocalCache('stock_logs', updated.map(toDbStockLog));
+        return updated;
+      });
       queueAction('insert', 'stock_logs', toDbStockLog(log));
 
       addAuditLog('Discard expired product', `Discarded remaining ${currentQty} units of expired "${pMatch.name}" and locked to zero.`);
@@ -687,8 +737,11 @@ export default function App() {
     };
 
     try {
-      setExpenses(prev => [...prev, completeExpense]);
-      setLocalCache('expenses', [...getLocalCache('expenses'), toDbExpense(completeExpense)]);
+      setExpenses(prev => {
+        const updated = [...prev, completeExpense];
+        setLocalCache('expenses', updated.map(toDbExpense));
+        return updated;
+      });
       queueAction('insert', 'expenses', toDbExpense(completeExpense));
       addAuditLog('Record Expense', `Logged financial expense under category "${completeExpense.category}" for KES ${completeExpense.amount}.`);
     } catch (err: any) {
@@ -702,8 +755,11 @@ export default function App() {
 
     if (window.confirm(`Are you sure you want to permanently delete expense entry "${itemToDel.itemName}" total KES ${itemToDel.amount}?`)) {
       try {
-        setExpenses(prev => prev.filter(e => e.id !== expenseId));
-        setLocalCache('expenses', getLocalCache('expenses').filter(e => e.id !== expenseId));
+        setExpenses(prev => {
+          const updated = prev.filter(e => e.id !== expenseId);
+          setLocalCache('expenses', updated.map(toDbExpense));
+          return updated;
+        });
         queueAction('delete', 'expenses', null, expenseId);
         addAuditLog('Delete Expense', `Removed expense log "${itemToDel.itemName}" of category "${itemToDel.category}" worth KES ${itemToDel.amount}.`);
       } catch (err: any) {
@@ -723,8 +779,11 @@ export default function App() {
     };
 
     try {
-      setUsers(prev => [...prev, mapProfile(toDbProfile(completeUser))]);
-      setLocalCache('profiles', [...getLocalCache('profiles'), toDbProfile(completeUser)]);
+      setUsers(prev => {
+        const updated = [...prev, mapProfile(toDbProfile(completeUser))];
+        setLocalCache('profiles', updated.map(toDbProfile));
+        return updated;
+      });
       queueAction('insert', 'profiles', toDbProfile(completeUser));
       addAuditLog('User Registered', `Registered operator credentials for cashiers @${completeUser.username} (${completeUser.fullName}).`);
     } catch (err: any) {
@@ -739,8 +798,11 @@ export default function App() {
     const nextState = !uMatch.active;
 
     try {
-      setUsers(prev => prev.map(u => u.id === userId ? { ...u, active: nextState } : u));
-      setLocalCache('profiles', getLocalCache('profiles').map(p => p.id === userId ? { ...p, active: nextState } : p));
+      setUsers(prev => {
+        const updated = prev.map(u => u.id === userId ? { ...u, active: nextState } : u);
+        setLocalCache('profiles', updated.map(toDbProfile));
+        return updated;
+      });
       queueAction('update', 'profiles', { active: nextState }, userId);
       addAuditLog('Employee Status Adjustment', `Toggled employee shift login block for ${uMatch.fullName} to ${nextState ? 'Unlocked' : 'Shift Locked'}.`);
     } catch (err: any) {
@@ -915,8 +977,12 @@ export default function App() {
         restorePayload: restorePayload
       };
 
-      setAuditLogs(prev => [...prev.filter(l => section === 'audit' ? false : true), freshLog]);
-      setLocalCache('audit_logs', [...getLocalCache('audit_logs').filter(() => section !== 'audit'), toDbAuditLog(freshLog)]);
+      setAuditLogs(prev => {
+        const filtered = prev.filter(l => section === 'audit' ? false : true);
+        const updated = [...filtered, freshLog];
+        setLocalCache('audit_logs', updated.map(toDbAuditLog));
+        return updated;
+      });
       queueAction('insert', 'audit_logs', toDbAuditLog(freshLog));
 
       alert(`${label} cleared successfully!`);
@@ -937,6 +1003,7 @@ export default function App() {
           restoredSales.forEach((s: Sale) => {
             if (!merged.some(x => x.id === s.id)) merged.push(s);
           });
+          setLocalCache('sales', merged.map(toDbSale));
           return merged;
         });
         setStockLogs(prev => {
@@ -944,21 +1011,10 @@ export default function App() {
           restoredLogs.forEach((sl: StockLog) => {
             if (!merged.some(x => x.id === sl.id)) merged.push(sl);
           });
+          setLocalCache('stock_logs', merged.map(toDbStockLog));
           return merged;
         });
         
-        const updatedSalesCache = getLocalCache('sales');
-        restoredSales.forEach((s: Sale) => {
-          if (!updatedSalesCache.some(x => x.id === s.id)) updatedSalesCache.push(toDbSale(s));
-        });
-        setLocalCache('sales', updatedSalesCache);
-
-        const updatedLogsCache = getLocalCache('stock_logs');
-        restoredLogs.forEach((sl: StockLog) => {
-          if (!updatedLogsCache.some(x => x.id === sl.id)) updatedLogsCache.push(toDbStockLog(sl));
-        });
-        setLocalCache('stock_logs', updatedLogsCache);
-
         restoredSales.forEach((s: Sale) => queueAction('insert', 'sales', toDbSale(s)));
         restoredLogs.forEach((sl: StockLog) => queueAction('insert', 'stock_logs', toDbStockLog(sl)));
 
@@ -969,13 +1025,9 @@ export default function App() {
           restoredProducts.forEach((p: Product) => {
             if (!merged.some(x => x.id === p.id)) merged.push(p);
           });
+          setLocalCache('products', merged.map(toDbProduct));
           return merged;
         });
-        const updatedCache = getLocalCache('products');
-        restoredProducts.forEach((p: Product) => {
-          if (!updatedCache.some(x => x.id === p.id)) updatedCache.push(toDbProduct(p));
-        });
-        setLocalCache('products', updatedCache);
         restoredProducts.forEach((p: Product) => queueAction('insert', 'products', toDbProduct(p)));
 
       } else if (section === 'expenses') {
@@ -985,13 +1037,9 @@ export default function App() {
           restoredExpenses.forEach((e: Expense) => {
             if (!merged.some(x => x.id === e.id)) merged.push(e);
           });
+          setLocalCache('expenses', merged.map(toDbExpense));
           return merged;
         });
-        const updatedCache = getLocalCache('expenses');
-        restoredExpenses.forEach((e: Expense) => {
-          if (!updatedCache.some(x => x.id === e.id)) updatedCache.push(toDbExpense(e));
-        });
-        setLocalCache('expenses', updatedCache);
         restoredExpenses.forEach((e: Expense) => queueAction('insert', 'expenses', toDbExpense(e)));
 
       } else if (section === 'suppliers') {
@@ -1001,13 +1049,9 @@ export default function App() {
           restoredSuppliers.forEach((s: Supplier) => {
             if (!merged.some(x => x.id === s.id)) merged.push(s);
           });
+          setLocalCache('suppliers', merged.map(toDbSupplier));
           return merged;
         });
-        const updatedCache = getLocalCache('suppliers');
-        restoredSuppliers.forEach((s: Supplier) => {
-          if (!updatedCache.some(x => x.id === s.id)) updatedCache.push(toDbSupplier(s));
-        });
-        setLocalCache('suppliers', updatedCache);
         restoredSuppliers.forEach((s: Supplier) => queueAction('insert', 'suppliers', toDbSupplier(s)));
 
       } else if (section === 'audit') {
@@ -1017,13 +1061,9 @@ export default function App() {
           restoredAudits.forEach((a: AuditLog) => {
             if (!merged.some(x => x.id === a.id)) merged.push(a);
           });
+          setLocalCache('audit_logs', merged.map(toDbAuditLog));
           return merged;
         });
-        const updatedCache = getLocalCache('audit_logs');
-        restoredAudits.forEach((a: AuditLog) => {
-          if (!updatedCache.some(x => x.id === a.id)) updatedCache.push(toDbAuditLog(a));
-        });
-        setLocalCache('audit_logs', updatedCache);
         restoredAudits.forEach((a: AuditLog) => queueAction('insert', 'audit_logs', toDbAuditLog(a)));
       }
 

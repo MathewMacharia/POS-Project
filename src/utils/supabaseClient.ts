@@ -226,17 +226,34 @@ export function toDbStockLog(sl: StockLog) {
 }
 
 // --- Offline & Sync System ---
+import Dexie, { type Table } from 'dexie';
 
-const CACHE_KEYS: Record<string, string> = {
-  profiles: 'dufuka_offline_profiles',
-  categories: 'dufuka_offline_categories',
-  products: 'dufuka_offline_products',
-  sales: 'dufuka_offline_sales',
-  expenses: 'dufuka_offline_expenses',
-  audit_logs: 'dufuka_offline_audit_logs',
-  suppliers: 'dufuka_offline_suppliers',
-  stock_logs: 'dufuka_offline_stock_logs'
-};
+class DufukaDatabase extends Dexie {
+  profiles!: Table<any>;
+  categories!: Table<any>;
+  products!: Table<any>;
+  sales!: Table<any>;
+  expenses!: Table<any>;
+  audit_logs!: Table<any>;
+  suppliers!: Table<any>;
+  stock_logs!: Table<any>;
+
+  constructor() {
+    super('DufukaPOSDatabase');
+    this.version(1).stores({
+      profiles: 'id, username, role, active',
+      categories: 'id, name',
+      products: 'id, name, category, barcode',
+      sales: 'id, receiptNumber, total, cashierId, dateAdded',
+      expenses: 'id, category, itemName, date',
+      audit_logs: 'id, userId, userName, action, timestamp',
+      suppliers: 'id, name',
+      stock_logs: 'id, productId, productName, type, timestamp'
+    });
+  }
+}
+
+export const db = new DufukaDatabase();
 
 interface QueueItem {
   id: string; // sync item action id
@@ -246,22 +263,28 @@ interface QueueItem {
   targetId?: string;
 }
 
-export function getLocalCache(table: string, fallback: any[] = []): any[] {
+export async function getLocalCache(table: string, fallback: any[] = []): Promise<any[]> {
   try {
-    const key = CACHE_KEYS[table] || `dufuka_offline_${table}`;
-    const data = localStorage.getItem(key);
-    return data ? JSON.parse(data) : fallback;
-  } catch {
+    const t = (db as any)[table];
+    if (!t) return fallback;
+    const data = await t.toArray();
+    return data && data.length > 0 ? data : fallback;
+  } catch (err) {
+    console.error(`getLocalCache error for table ${table}:`, err);
     return fallback;
   }
 }
 
-export function setLocalCache(table: string, data: any[]) {
+export async function setLocalCache(table: string, data: any[]) {
   try {
-    const key = CACHE_KEYS[table] || `dufuka_offline_${table}`;
-    localStorage.setItem(key, JSON.stringify(data));
+    const t = (db as any)[table];
+    if (!t) return;
+    await t.clear();
+    if (data && data.length > 0) {
+      await t.bulkAdd(data);
+    }
   } catch (err) {
-    console.error("LocalCache save failed:", err);
+    console.error(`setLocalCache error for table ${table}:`, err);
   }
 }
 
@@ -334,10 +357,12 @@ export async function triggerSync(onSyncSuccess?: () => void) {
 
     try {
       if (item.action === 'insert') {
-        const { error } = await supabase.from(item.table).insert([item.payload]);
+        const { error } = await supabase.from(item.table).upsert([item.payload]);
         if (error) {
-          console.error(`[Offline Sync] Insert error for ${item.table}:`, error);
-          if (isTransientError(error)) {
+          console.error(`[Offline Sync] Insert/Upsert error for ${item.table}:`, error);
+          if (error.code === '23505') {
+            console.warn(`[Offline Sync] Row already exists in ${item.table}. Skipping queue item.`);
+          } else if (isTransientError(error)) {
             throw new Error(`Transient: ${error.message || 'database timeout'}`);
           }
         }
