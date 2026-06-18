@@ -38,19 +38,7 @@ export default function Dashboard({
 }: DashboardProps) {
   // Stats calculations
   const today = new Date();
-  const todayStr = (() => {
-    const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'Africa/Nairobi',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    });
-    const parts = formatter.formatToParts(today);
-    const y = parts.find(p => p.type === 'year')?.value;
-    const m = parts.find(p => p.type === 'month')?.value;
-    const d = parts.find(p => p.type === 'day')?.value;
-    return `${y}-${m}-${d}`;
-  })();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   
   const formattedCurrency = (val: number) => {
     return new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 }).format(val);
@@ -61,17 +49,8 @@ export default function Dashboard({
   const totalSalesToday = salesToday.reduce((sum, s) => sum + s.total, 0);
   const transactionsTodayCount = salesToday.length;
 
-  const currentMonthStr = (() => {
-    const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'Africa/Nairobi',
-      year: 'numeric',
-      month: '2-digit'
-    });
-    const parts = formatter.formatToParts(today);
-    const y = parts.find(p => p.type === 'year')?.value;
-    const m = parts.find(p => p.type === 'month')?.value;
-    return `${y}-${m}`;
-  })();
+  // 2. Total sales this month
+  const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
   const salesThisMonth = sales.filter(s => s.dateAdded.startsWith(currentMonthStr));
   const totalSalesThisMonth = salesThisMonth.reduce((sum, s) => sum + s.total, 0);
 
@@ -140,20 +119,11 @@ export default function Dashboard({
     return sum + saleProfit;
   }, 0);
 
+  // 7-day sales trend (last 8 days dynamically)
   const daysOfTrend = Array.from({ length: 8 }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - (7 - i));
-    const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'Africa/Nairobi',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    });
-    const parts = formatter.formatToParts(d);
-    const y = parts.find(p => p.type === 'year')?.value;
-    const m = parts.find(p => p.type === 'month')?.value;
-    const dayVal = parts.find(p => p.type === 'day')?.value;
-    return `${y}-${m}-${dayVal}`;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   });
   
   const dailyTotals = daysOfTrend.map(targetDate => {

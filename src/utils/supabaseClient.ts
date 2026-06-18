@@ -10,20 +10,6 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-export function getLocalISOString(date: Date): string {
-  const tzOffset = -date.getTimezoneOffset();
-  const diff = tzOffset >= 0 ? '+' : '-';
-  const pad = (num: number) => String(Math.floor(Math.abs(num))).padStart(2, '0');
-  return date.getFullYear() +
-    '-' + pad(date.getMonth() + 1) +
-    '-' + pad(date.getDate()) +
-    'T' + pad(date.getHours()) +
-    ':' + pad(date.getMinutes()) +
-    ':' + pad(date.getSeconds()) +
-    diff + pad(tzOffset / 60) +
-    ':' + pad(tzOffset % 60);
-}
-
 // --- Mappers ---
 
 export function mapProfile(p: any): User {
@@ -328,21 +314,6 @@ export function queueAction(action: 'insert' | 'update' | 'delete', table: strin
   triggerSync();
 }
 
-export function queueActions(actions: { action: 'insert' | 'update' | 'delete', table: string, payload: any, targetId?: string }[]) {
-  const queue = getSyncQueue();
-  actions.forEach(act => {
-    queue.push({
-      id: `sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      action: act.action,
-      table: act.table,
-      payload: act.payload,
-      targetId: act.targetId
-    });
-  });
-  saveSyncQueue(queue);
-  triggerSync();
-}
-
 let isSyncing = false;
 
 function isTransientError(error: any): boolean {
@@ -367,76 +338,80 @@ export async function triggerSync(onSyncSuccess?: () => void) {
   if (isSyncing || !navigator.onLine) return;
   isSyncing = true;
 
-  const queue = getSyncQueue();
-  if (queue.length === 0) {
-    isSyncing = false;
-    return;
-  }
+  try {
+    const queue = getSyncQueue();
+    console.log('[Offline Sync Log] getSyncQueue at start of triggerSync:', JSON.stringify(queue, null, 2));
 
-  console.log(`[Offline Sync] Starting sync of ${queue.length} pending actions.`);
-
-  const remainingQueue: QueueItem[] = [];
-  let hasNetworkError = false;
-
-  for (const item of queue) {
-    if (hasNetworkError) {
-      remainingQueue.push(item);
-      continue;
+    if (queue.length === 0) {
+      return;
     }
 
-    try {
-      if (item.action === 'insert') {
-        const { error } = await supabase.from(item.table).upsert([item.payload]);
-        if (error) {
-          console.error(`[Offline Sync] Insert/Upsert error for ${item.table}:`, error);
-          if (error.code === '23505') {
-            console.warn(`[Offline Sync] Row already exists in ${item.table}. Skipping queue item.`);
-          } else if (isTransientError(error)) {
-            throw new Error(`Transient: ${error.message || 'database timeout'}`);
-          }
-        }
-      } else if (item.action === 'update') {
-        const { error } = await supabase.from(item.table).update(item.payload).eq('id', item.targetId);
-        if (error) {
-          console.error(`[Offline Sync] Update error for ${item.table}:`, error);
-          if (isTransientError(error)) {
-            throw new Error(`Transient: ${error.message || 'database timeout'}`);
-          }
-        }
-      } else if (item.action === 'delete') {
-        const { error } = await supabase.from(item.table).delete().eq('id', item.targetId);
-        if (error) {
-          console.error(`[Offline Sync] Delete error for ${item.table}:`, error);
-          if (isTransientError(error)) {
-            throw new Error(`Transient: ${error.message || 'database timeout'}`);
-          }
-        }
-      }
-    } catch (err: any) {
-      const errMsg = (err.message || '').toLowerCase();
-      if (errMsg.includes('failed to fetch') || errMsg.includes('network') || errMsg.includes('timeout') || errMsg.includes('transient')) {
-        console.warn("[Offline Sync] Network/Server connectivity lost. Halting sync queue.");
-        hasNetworkError = true;
+    console.log(`[Offline Sync] Starting sync of ${queue.length} pending actions.`);
+
+    const remainingQueue: QueueItem[] = [];
+    let hasNetworkError = false;
+
+    for (const item of queue) {
+      if (hasNetworkError) {
         remainingQueue.push(item);
-      } else {
-        console.error(`[Offline Sync] Permanent error processing queue item:`, err);
+        continue;
+      }
+
+      try {
+        if (item.action === 'insert') {
+          const { error } = await supabase.from(item.table).upsert([item.payload]);
+          if (error) {
+            console.error(`[Offline Sync] Insert/Upsert error for ${item.table}:`, error);
+            if (error.code === '23505') {
+              console.warn(`[Offline Sync] Row already exists in ${item.table}. Skipping queue item.`);
+            } else if (isTransientError(error)) {
+              throw new Error(`Transient: ${error.message || 'database timeout'}`);
+            }
+          }
+        } else if (item.action === 'update') {
+          if (item.table === 'products') {
+            console.log(`[Supabase Sync Push] Attempting update for products: id=${item.targetId}, payload=`, JSON.stringify(item.payload));
+          }
+          const { data, error } = await supabase.from(item.table).update(item.payload).eq('id', item.targetId).select();
+          if (item.table === 'products') {
+            console.log(`[Supabase Sync Response] Products update result: data=`, JSON.stringify(data), `error=`, JSON.stringify(error));
+          }
+          if (error) {
+            console.error(`[Offline Sync] Update error for ${item.table}:`, error);
+            if (isTransientError(error)) {
+              throw new Error(`Transient: ${error.message || 'database timeout'}`);
+            }
+          }
+        } else if (item.action === 'delete') {
+          const { error } = await supabase.from(item.table).delete().eq('id', item.targetId);
+          if (error) {
+            console.error(`[Offline Sync] Delete error for ${item.table}:`, error);
+            if (isTransientError(error)) {
+              throw new Error(`Transient: ${error.message || 'database timeout'}`);
+            }
+          }
+        }
+      } catch (err: any) {
+        const errMsg = (err.message || '').toLowerCase();
+        if (errMsg.includes('failed to fetch') || errMsg.includes('network') || errMsg.includes('timeout') || errMsg.includes('transient')) {
+          console.warn("[Offline Sync] Network/Server connectivity lost. Halting sync queue.");
+          console.log('[Queue after halt]', getSyncQueue());
+          console.log('[Queue items details]', getSyncQueue().map(q => ({ table: q.table, action: q.action })));
+          hasNetworkError = true;
+          remainingQueue.push(item);
+        } else {
+          console.error(`[Offline Sync] Permanent error processing queue item:`, err);
+        }
       }
     }
-  }
 
-  // Merge remaining items and keep items added during async processing
-  const latestQueue = getSyncQueue();
-  const updatedQueue = latestQueue.filter(latestItem => 
-    remainingQueue.some(remItem => remItem.id === latestItem.id) ||
-    !queue.some(processedItem => processedItem.id === latestItem.id)
-  );
-  saveSyncQueue(updatedQueue);
-  isSyncing = false;
+    saveSyncQueue(remainingQueue);
 
-  if (!hasNetworkError && remainingQueue.length === 0) {
-    if (onSyncSuccess) {
+    if (!hasNetworkError && remainingQueue.length === 0 && onSyncSuccess) {
       onSyncSuccess();
     }
+  } finally {
+    isSyncing = false;
   }
 }
 
@@ -467,6 +442,13 @@ export function mergeRemoteWithSyncQueue(table: string, remoteData: any[]): any[
     console.error("Error merging remote with sync queue:", err);
     return remoteData;
   }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    console.log('[Offline Sync] Connectivity restored. Retrying queue...');
+    triggerSync();
+  });
 }
 
 

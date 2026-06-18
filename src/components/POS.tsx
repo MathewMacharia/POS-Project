@@ -20,7 +20,6 @@ import {
 } from 'lucide-react';
 import { Product, SaleItem, Sale, ShopSettings } from '../types';
 import { generateReceiptPDF } from '../utils/pdfGenerator';
-import { getLocalISOString } from '../utils/supabaseClient';
 
 interface POSProps {
   products: Product[];
@@ -305,7 +304,7 @@ export default function POS({
         changeAmount: changeFinal,
         cashierId: currentUser?.id || 'usr_unknown',
         cashierName: currentUser?.fullName || 'Cashier',
-        dateAdded: getLocalISOString(new Date())
+        dateAdded: new Date().toISOString()
       };
       setCompletedSale(draftSale);
       setIsReceiptSaved(false);
