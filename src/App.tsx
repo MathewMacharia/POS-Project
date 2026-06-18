@@ -75,7 +75,7 @@ import {
   mapAuditLog, toDbAuditLog,
   mapSupplier, toDbSupplier,
   mapStockLog, toDbStockLog,
-  getLocalCache, setLocalCache,
+  getLocalCache, setLocalCache, db,
   queueAction, triggerSync, mergeRemoteWithSyncQueue
 } from './utils/supabaseClient';
 
@@ -204,11 +204,15 @@ export default function App() {
           console.log('[Supabase Load] Products merged with sync queue:', JSON.stringify(merged.map(p => ({ id: p.id, name: p.name, quantity_in_stock: p.quantity_in_stock }))));
 
           // Log current Dexie values before overwrite
-          for (const p of merged) {
-            const currentLocal = await db.products.get(p.id);
-            if (currentLocal) {
-              console.log(`[Dexie Overwrite Log] Product ${p.name} (${p.id}): current local quantity=${currentLocal.quantity_in_stock}, new overwrite quantity=${p.quantity_in_stock}`);
+          try {
+            for (const p of merged) {
+              const currentLocal = await db.products.get(p.id);
+              if (currentLocal) {
+                console.log(`[Dexie Overwrite Log] Product ${p.name} (${p.id}): current local quantity=${currentLocal.quantity_in_stock}, new overwrite quantity=${p.quantity_in_stock}`);
+              }
             }
+          } catch (e) {
+            console.warn('[Diagnostic only - non-fatal]', e);
           }
 
           setProducts(merged.map(mapProduct));
@@ -475,15 +479,6 @@ export default function App() {
       });
       setProducts(updatedProducts);
       setLocalCache('products', updatedProducts.map(toDbProduct));
-
-      // Trace Dexie write independently
-      cartItems.forEach(item => {
-        db.products.get(item.id).then(p => {
-          console.log(`[Dexie Trace] Product ${item.name} (${item.id}) stock after sale in Dexie:`, p ? p.quantity_in_stock : 'not found');
-        }).catch(err => {
-          console.error(`[Dexie Trace Error] failed to get product ${item.name} from Dexie:`, err);
-        });
-      });
 
       // 3. Append to stock movement logs locally
       const newStockLogsToSave: StockLog[] = [];
