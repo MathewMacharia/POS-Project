@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { Product, Sale, Expense } from '../types';
+import { getNairobiDateStr, getNairobiToday } from '../utils/timezoneHelper';
 
 interface ReportsProps {
   sales: Sale[];
@@ -39,8 +40,8 @@ export default function Reports({
   expenses = [],
   initialPeriod
 }: ReportsProps) {
+  const { todayStr, currentMonthStr } = getNairobiToday();
   const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
   // Helper currency formatter
   const KES = (amount: number) => {
@@ -271,7 +272,7 @@ export default function Reports({
 
   // --- 1. DAILY MATH CALCULATIONS (For Today: June 8, 2026) ---
   const dailySales = useMemo(() => {
-    return sales.filter(s => s.dateAdded.startsWith(todayStr));
+    return sales.filter(s => getNairobiDateStr(s.dateAdded) === todayStr);
   }, [sales, todayStr]);
 
   const dailyTotalsObj = useMemo(() => {
@@ -302,9 +303,8 @@ export default function Reports({
 
   // --- 2. MONTHLY MATH CALCULATIONS ---
   const monthlySales = useMemo(() => {
-    const currentMonthPrefix = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-    return sales.filter(s => s.dateAdded.startsWith(currentMonthPrefix));
-  }, [sales, today]);
+    return sales.filter(s => getNairobiDateStr(s.dateAdded).startsWith(currentMonthStr));
+  }, [sales, currentMonthStr]);
 
   const monthlyTotalsObj = useMemo(() => {
     return monthlySales.reduce((acc, s) => {
@@ -427,12 +427,11 @@ export default function Reports({
       : 'AI DIAGNOSTICS DEEP-DIVE';
 
   const totalPeriodExpenses = useMemo(() => {
-    const currentMonthPrefix = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-    const filterDateStr = reportPeriod === 'daily' ? todayStr : currentMonthPrefix;
+    const filterDateStr = reportPeriod === 'daily' ? todayStr : currentMonthStr;
     return expenses
       .filter(e => e.date.startsWith(filterDateStr))
       .reduce((sum, e) => sum + e.amount, 0);
-  }, [expenses, reportPeriod, todayStr, today]);
+  }, [expenses, reportPeriod, todayStr, currentMonthStr]);
 
   return (
     <div className="space-y-6 printable-report-area" id="reports-module-page">

@@ -13,6 +13,7 @@ import {
   Download
 } from 'lucide-react';
 import { Expense, User } from '../types';
+import { getNairobiToday } from '../utils/timezoneHelper';
 
 interface ExpensesProps {
   expenses: Expense[];
@@ -32,8 +33,8 @@ const PRESET_CATEGORIES = [
 
 export default function Expenses({ expenses, onAddExpense, onDeleteExpense, currentUser }: ExpensesProps) {
   // System local date dynamically generated
+  const { todayStr, currentMonthStr } = getNairobiToday();
   const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
   // State
   const [categories, setCategories] = useState<string[]>(() => {
@@ -138,8 +139,7 @@ export default function Expenses({ expenses, onAddExpense, onDeleteExpense, curr
       if (filterPeriod === 'daily') {
         matchesPeriod = exp.date === todayStr;
       } else if (filterPeriod === 'monthly') {
-        const currentMonthPrefix = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-        matchesPeriod = exp.date.startsWith(currentMonthPrefix);
+        matchesPeriod = exp.date.startsWith(currentMonthStr);
       }
 
       return matchesSearch && matchesCategory && matchesPeriod;
@@ -149,8 +149,7 @@ export default function Expenses({ expenses, onAddExpense, onDeleteExpense, curr
   // High-Level Math Indicators
   const metrics = useMemo(() => {
     const todayExpenses = expenses.filter(e => e.date === todayStr);
-    const currentMonthPrefix = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-    const thisMonthExpenses = expenses.filter(e => e.date.startsWith(currentMonthPrefix));
+    const thisMonthExpenses = expenses.filter(e => e.date.startsWith(currentMonthStr));
 
     const dailyTotal = todayExpenses.reduce((sum, e) => sum + e.amount, 0);
     const monthlyTotal = thisMonthExpenses.reduce((sum, e) => sum + e.amount, 0);

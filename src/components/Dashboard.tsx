@@ -16,6 +16,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { Product, Sale } from '../types';
+import { getNairobiDateStr, getNairobiToday } from '../utils/timezoneHelper';
 
 interface DashboardProps {
   products: Product[];
@@ -37,21 +38,20 @@ export default function Dashboard({
   shopName = 'Dufuka Shop'
 }: DashboardProps) {
   // Stats calculations
+  const { todayStr, currentMonthStr, nairobiNow } = getNairobiToday();
   const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   
   const formattedCurrency = (val: number) => {
     return new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 }).format(val);
   };
 
   // 1. Total sales today
-  const salesToday = sales.filter(s => s.dateAdded.startsWith(todayStr));
+  const salesToday = sales.filter(s => getNairobiDateStr(s.dateAdded) === todayStr);
   const totalSalesToday = salesToday.reduce((sum, s) => sum + s.total, 0);
   const transactionsTodayCount = salesToday.length;
 
   // 2. Total sales this month
-  const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-  const salesThisMonth = sales.filter(s => s.dateAdded.startsWith(currentMonthStr));
+  const salesThisMonth = sales.filter(s => getNairobiDateStr(s.dateAdded).startsWith(currentMonthStr));
   const totalSalesThisMonth = salesThisMonth.reduce((sum, s) => sum + s.total, 0);
 
   // 3. Stock metrics
@@ -121,14 +121,14 @@ export default function Dashboard({
 
   // 7-day sales trend (last 8 days dynamically)
   const daysOfTrend = Array.from({ length: 8 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (7 - i));
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const d = new Date(nairobiNow.getTime());
+    d.setUTCDate(d.getUTCDate() - (7 - i));
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
   });
   
   const dailyTotals = daysOfTrend.map(targetDate => {
     return sales
-      .filter(s => s.dateAdded.startsWith(targetDate))
+      .filter(s => getNairobiDateStr(s.dateAdded) === targetDate)
       .reduce((sum, s) => sum + s.total, 0);
   });
 
