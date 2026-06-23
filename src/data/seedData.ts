@@ -4,7 +4,7 @@ export const INITIAL_USERS: User[] = [
   {
     id: 'usr_1',
     username: 'admin',
-    fullName: 'Erick Omondi',
+    fullName: 'admin',
     email: 'admin@kenyapos.co.ke',
     role: 'admin',
     phone: '0712345678',
@@ -386,7 +386,7 @@ export const INITIAL_SALES: Sale[] = [
     paidAmount: 6300,
     changeAmount: 0,
     cashierId: 'usr_1',
-    cashierName: 'Erick Omondi',
+    cashierName: 'admin',
     dateAdded: '2026-06-03T16:45:00Z'
   },
   {
@@ -511,7 +511,7 @@ export const INITIAL_SALES: Sale[] = [
     paidAmount: 2880,
     changeAmount: 0,
     cashierId: 'usr_1',
-    cashierName: 'Erick Omondi',
+    cashierName: 'admin',
     dateAdded: '2026-06-08T09:20:00Z'
   }
 ];
@@ -524,7 +524,7 @@ export const INITIAL_STOCK_LOGS: StockLog[] = [
     changeQty: 50,
     type: 'initial',
     timestamp: '2026-02-15T13:45:00Z',
-    operatorName: 'Erick Omondi'
+    operatorName: 'admin'
   },
   {
     id: 'log_2',
@@ -533,7 +533,7 @@ export const INITIAL_STOCK_LOGS: StockLog[] = [
     changeQty: 80,
     type: 'initial',
     timestamp: '2026-02-15T13:50:00Z',
-    operatorName: 'Erick Omondi'
+    operatorName: 'admin'
   },
   {
     id: 'log_3',
@@ -542,7 +542,7 @@ export const INITIAL_STOCK_LOGS: StockLog[] = [
     changeQty: 5,
     type: 'initial',
     timestamp: '2026-04-15T11:10:00Z',
-    operatorName: 'Erick Omondi'
+    operatorName: 'admin'
   },
   {
     id: 'log_4',
@@ -551,7 +551,7 @@ export const INITIAL_STOCK_LOGS: StockLog[] = [
     changeQty: -5,
     type: 'discard_expired',
     timestamp: '2026-06-06T10:00:00Z',
-    operatorName: 'Erick Omondi',
+    operatorName: 'admin',
     notes: 'Discarded damaged and leaking bottles.'
   }
 ];
@@ -560,7 +560,7 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
   {
     id: 'aud_1',
     userId: 'usr_1',
-    userName: 'Erick Omondi',
+    userName: 'admin',
     action: 'System Initialized',
     details: 'Kenyan Retail Shop POS populated with original seed products and configurations.',
     timestamp: '2026-06-08T06:00:00Z'
@@ -602,7 +602,7 @@ export const INITIAL_EXPENSES = [
     amount: 5000,
     date: '2026-06-05',
     notes: 'Primary backoffice routing and payment gateway internet wifi bills paid.',
-    recordedBy: 'Erick Omondi',
+    recordedBy: 'admin',
     timestamp: '2026-06-05T09:30:00Z'
   },
   {
@@ -612,7 +612,7 @@ export const INITIAL_EXPENSES = [
     amount: 1200,
     date: '2026-06-06',
     notes: 'Delivery fee for bulk detergents to retail distributors.',
-    recordedBy: 'Erick Omondi',
+    recordedBy: 'admin',
     timestamp: '2026-06-06T14:15:00Z'
   },
   {
@@ -622,7 +622,7 @@ export const INITIAL_EXPENSES = [
     amount: 3500,
     date: '2026-06-08',
     notes: 'Power backup prepaid units allocated to electricity meter.',
-    recordedBy: 'Erick Omondi',
+    recordedBy: 'admin',
     timestamp: '2026-06-08T11:00:00Z'
   }
 ];

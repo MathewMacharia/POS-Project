@@ -135,7 +135,17 @@ export default function App() {
 
   // UI Flow states
   const [activeTab, setActiveTab] = useState<string>(() => {
-    return localStorage.getItem('dufuka_active_tab') || 'dashboard';
+    const savedTab = localStorage.getItem('dufuka_active_tab') || 'dashboard';
+    const savedUserStr = localStorage.getItem('dufuka_current_user');
+    if (savedUserStr) {
+      try {
+        const savedUser = JSON.parse(savedUserStr);
+        if (savedUser.role === 'cashier') {
+          return (savedTab === 'pos' || savedTab === 'stock') ? savedTab : 'pos';
+        }
+      } catch {}
+    }
+    return savedTab;
   });
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
@@ -148,6 +158,13 @@ export default function App() {
   const [loginPassword, setLoginPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [loginError, setLoginError] = useState('');
+
+  // PIN change states
+  const [showChangeDefaultPin, setShowChangeDefaultPin] = useState(false);
+  const [pinChangeUsername, setPinChangeUsername] = useState('admin');
+  const [newPin, setNewPin] = useState('');
+  const [confirmNewPin, setConfirmNewPin] = useState('');
+  const [pinChangeError, setPinChangeError] = useState('');
 
   // ----- 2. LOAD DATA FROM SUPABASE ON MOUNT WITH OFFLINE CACHE -----
   useEffect(() => {
@@ -375,7 +392,14 @@ export default function App() {
         return;
       }
 
-      if (loginPassword !== profile.pin && loginPassword !== 'password') {
+      // Check for first-time login passcode setup for super admin
+      if (profile.username === 'admin' && profile.pin === '1234' && loginPassword === '1234') {
+        setPinChangeUsername('admin');
+        setShowChangeDefaultPin(true);
+        return;
+      }
+
+      if (loginPassword !== profile.pin) {
         setLoginError('Incorrect PIN passcode entered.');
         return;
       }
@@ -412,6 +436,64 @@ export default function App() {
       setLoginPassword('');
     } catch (err: any) {
       setLoginError('Authentication error: ' + err.message);
+    }
+  };
+
+  const handlePinChangeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPinChangeError('');
+
+    if (!newPin.trim()) {
+      setPinChangeError('PIN passcode cannot be empty.');
+      return;
+    }
+
+    if (newPin !== confirmNewPin) {
+      setPinChangeError('PIN codes do not match. Please verify.');
+      return;
+    }
+
+    if (newPin === '1234') {
+      setPinChangeError('You must choose a passcode different from the default "1234".');
+      return;
+    }
+
+    try {
+      if (navigator.onLine) {
+        const { error } = await supabase
+          .from('profiles')
+          .update({ pin: newPin.trim() })
+          .eq('username', pinChangeUsername);
+        
+        if (error) throw error;
+      } else {
+        const cached = await getLocalCache('profiles');
+        const userProf = cached.find(p => p.username === pinChangeUsername);
+        if (userProf) {
+          queueAction('update', 'profiles', { pin: newPin.trim() }, userProf.id);
+        }
+      }
+
+      const cachedProfiles = await getLocalCache('profiles');
+      const updated = cachedProfiles.map(p => {
+        if (p.username === pinChangeUsername) {
+          return { ...p, pin: newPin.trim() };
+        }
+        return p;
+      });
+      await setLocalCache('profiles', updated);
+      setUsers(updated.map(mapProfile));
+
+      await addAuditLog('Passcode Changed', `Operator ${pinChangeUsername} passcode updated from default value.`);
+
+      alert('Admin passcode updated successfully! Please log in with your new PIN.');
+      
+      setShowChangeDefaultPin(false);
+      setNewPin('');
+      setConfirmNewPin('');
+      setLoginPassword('');
+    } catch (err: any) {
+      setPinChangeError('Failed to update passcode: ' + err.message);
     }
   };
 
@@ -817,13 +899,12 @@ export default function App() {
   };
 
   // ----- 6. USER/CASHIER MANAGEMENT ACTIONS -----
-  const handleRegisterUser = async (newUserFields: Omit<User, 'id'>) => {
+  const handleRegisterUser = async (newUserFields: Omit<User, 'id'> & { pin: string }) => {
     const userId = crypto.randomUUID();
-    const defaultPin = "1234";
     const completeUser = {
       ...newUserFields,
       id: userId,
-      pin: defaultPin
+      pin: newUserFields.pin
     };
 
     try {
@@ -855,6 +936,30 @@ export default function App() {
       addAuditLog('Employee Status Adjustment', `Toggled employee shift login block for ${uMatch.fullName} to ${nextState ? 'Unlocked' : 'Shift Locked'}.`);
     } catch (err: any) {
       alert("Toggle status failed: " + err.message);
+    }
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+    const userToDel = users.find(u => u.id === userId);
+    if (!userToDel) return;
+
+    try {
+      setUsers(prev => {
+        const updated = prev.filter(u => u.id !== userId);
+        setLocalCache('profiles', updated.map(toDbProfile));
+        return updated;
+      });
+
+      if (navigator.onLine) {
+        const { error } = await supabase.from('profiles').delete().eq('id', userId);
+        if (error) throw error;
+      } else {
+        queueAction('delete', 'profiles', null, userId);
+      }
+
+      addAuditLog('User Deleted', `Deleted cashier/operator credentials for @${userToDel.username} (${userToDel.fullName}).`);
+    } catch (err: any) {
+      alert("Delete operator failed: " + err.message);
     }
   };
 
@@ -910,7 +1015,7 @@ export default function App() {
             const restorationAudit: AuditLog = {
               id: `aud_${Date.now()}`,
               userId: currentUser?.id || 'admin',
-              userName: currentUser?.fullName || 'Erick Omondi',
+              userName: currentUser?.fullName || 'admin',
               action: 'Database Restored',
               details: `Uploaded historical database backup dated ${parsed.backupTimestamp || 'N/A'}. Refreshing dashboard parameters.`,
               timestamp: new Date().toISOString()
@@ -1178,6 +1283,88 @@ export default function App() {
 
   // ----- 9. RENDER BRANCH ROUTINGS (If No login Session exists, show login panel) -----
   if (!currentUser) {
+    if (showChangeDefaultPin) {
+      return (
+        <div className="min-h-screen bg-slate-100 dark:bg-zinc-950 flex flex-col items-center justify-center p-4 transition-colors duration-200" id="pin-change-screen-view">
+          <div className="max-w-md w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-xl p-8 relative overflow-hidden" id="pin-change-card">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl"></div>
+            
+            <div className="text-center space-y-2 mb-6" id="pin-change-header">
+              <div className="bg-amber-50 dark:bg-amber-950 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto text-amber-600 dark:text-amber-400">
+                <Key className="w-8 h-8 pointer-events-none" />
+              </div>
+              <h1 className="text-2xl font-extrabold font-sans text-zinc-900 dark:text-white tracking-tight">
+                First-Time Login Security Setup
+              </h1>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-normal font-medium">
+                Please change the default administrator PIN passcode to secure your Point of Sale system.
+              </p>
+            </div>
+
+            <form onSubmit={handlePinChangeSubmit} className="space-y-4" id="pin-change-form">
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wide text-zinc-400 block mb-1">
+                  New PIN / Passcode *
+                </label>
+                <input
+                  id="new-pin-input"
+                  type="password"
+                  required
+                  placeholder="Enter new PIN passcode"
+                  value={newPin}
+                  onChange={(e) => setNewPin(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-zinc-900 dark:bg-zinc-900 text-white dark:text-white border border-zinc-700/80 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm focus:bg-zinc-950 dark:focus:bg-zinc-950 transition"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wide text-zinc-400 block mb-1">
+                  Confirm New PIN / Passcode *
+                </label>
+                <input
+                  id="confirm-pin-input"
+                  type="password"
+                  required
+                  placeholder="Confirm new PIN passcode"
+                  value={confirmNewPin}
+                  onChange={(e) => setConfirmNewPin(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-zinc-900 dark:bg-zinc-900 text-white dark:text-white border border-zinc-700/80 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm focus:bg-zinc-950 dark:focus:bg-zinc-950 transition"
+                />
+              </div>
+
+              {pinChangeError && (
+                <p className="text-xs text-red-655 font-semibold text-center bg-red-50 dark:bg-red-950/20 py-2 rounded-lg border border-red-200/50">
+                  {pinChangeError}
+                </p>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowChangeDefaultPin(false);
+                    setNewPin('');
+                    setConfirmNewPin('');
+                    setPinChangeError('');
+                  }}
+                  className="w-1/2 py-3 bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 font-extrabold rounded-xl shadow-md transition duration-150 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="w-1/2 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl shadow-md transition duration-150 cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Save className="w-5 h-5" />
+                  Save &amp; Login
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-slate-100 dark:bg-zinc-950 flex flex-col items-center justify-center p-4 transition-colors duration-200" id="login-screen-view">
         <div className="max-w-md w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-xl p-8 relative overflow-hidden" id="login-card">
@@ -1220,7 +1407,7 @@ export default function App() {
                   id="login-passcode-input"
                   type={showPass ? 'text' : 'password'}
                   required
-                  placeholder="PIN code (default is 'password')"
+                  placeholder="PIN code (default is '1234')"
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}
                   className="w-full pl-4 pr-10 py-2.5 bg-zinc-900 dark:bg-zinc-900 text-white dark:text-white border border-zinc-700/80 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm focus:bg-zinc-950 dark:focus:bg-zinc-950 transition"
@@ -1260,19 +1447,19 @@ export default function App() {
             <div className="grid grid-cols-2 gap-2 mt-1">
               <button
                 type="button"
-                onClick={() => { setLoginUsername('admin'); setLoginPassword('password'); }}
+                onClick={() => { setLoginUsername('admin'); setLoginPassword('1234'); }}
                 className="p-2 border border-dashed border-zinc-200 dark:border-zinc-800 hover:border-emerald-500 dark:hover:border-emerald-500 hover:bg-zinc-50 dark:hover:bg-zinc-800/40 rounded-lg text-left text-[11px] font-semibold transition cursor-pointer"
               >
-                <span className="text-zinc-800 dark:text-zinc-200 block text-xs truncate">Erick Omondi (Admin)</span>
-                <span className="text-[10px] text-zinc-400">@admin / password</span>
+                <span className="text-zinc-800 dark:text-zinc-200 block text-xs truncate">admin (Admin)</span>
+                <span className="text-[10px] text-zinc-400">@admin / 1234</span>
               </button>
               <button
                 type="button"
-                onClick={() => { setLoginUsername('cashier'); setLoginPassword('password'); }}
+                onClick={() => { setLoginUsername('cashier'); setLoginPassword('5678'); }}
                 className="p-2 border border-dashed border-zinc-200 dark:border-zinc-800 hover:border-emerald-500 dark:hover:border-emerald-500 hover:bg-zinc-50 dark:hover:bg-zinc-800/40 rounded-lg text-left text-[11px] font-semibold transition cursor-pointer"
               >
                 <span className="text-zinc-800 dark:text-zinc-200 block text-xs truncate">Jane Wambui (Cashier)</span>
-                <span className="text-[10px] text-zinc-400 font-mono">@cashier / password</span>
+                <span className="text-[10px] text-zinc-400 font-mono">@cashier / 5678</span>
               </button>
             </div>
           </div>
@@ -1366,14 +1553,16 @@ export default function App() {
           <nav className={`p-4 space-y-1.5 text-xs font-bold transition-all duration-200 ${isSidebarCollapsed ? 'px-2' : ''}`} id="sidebar-nav-elements">
             
             {/* 1. Dashboard */}
-            <button
-              onClick={() => { setActiveTab('dashboard'); setIsSidebarOpen(false); }}
-              className={getSidebarTabClass('dashboard')}
-              title={isSidebarCollapsed ? "Metrics Dashboard" : undefined}
-            >
-              <Activity className="w-4.5 h-4.5 shrink-0" />
-              {showText && <span className="truncate">Metrics Dashboard</span>}
-            </button>
+            {currentUser.role === 'admin' && (
+              <button
+                onClick={() => { setActiveTab('dashboard'); setIsSidebarOpen(false); }}
+                className={getSidebarTabClass('dashboard')}
+                title={isSidebarCollapsed ? "Metrics Dashboard" : undefined}
+              >
+                <Activity className="w-4.5 h-4.5 shrink-0" />
+                {showText && <span className="truncate">Metrics Dashboard</span>}
+              </button>
+            )}
 
             {/* 2. Sales Cashier POS Terminal link */}
             <button
@@ -1386,14 +1575,16 @@ export default function App() {
             </button>
 
             {/* 3. Catalog & Product manager */}
-            <button
-              onClick={() => { setActiveTab('inventory'); setIsSidebarOpen(false); }}
-              className={getSidebarTabClass('inventory')}
-              title={isSidebarCollapsed ? "Product Catalog" : undefined}
-            >
-              <Package className="w-4.5 h-4.5 shrink-0" />
-              {showText && <span className="truncate">Product Catalog</span>}
-            </button>
+            {currentUser.role === 'admin' && (
+              <button
+                onClick={() => { setActiveTab('inventory'); setIsSidebarOpen(false); }}
+                className={getSidebarTabClass('inventory')}
+                title={isSidebarCollapsed ? "Product Catalog" : undefined}
+              >
+                <Package className="w-4.5 h-4.5 shrink-0" />
+                {showText && <span className="truncate">Product Catalog</span>}
+              </button>
+            )}
 
             {/* 4. Stock, expiries & logs */}
             <button
@@ -1406,54 +1597,64 @@ export default function App() {
             </button>
 
             {/* 5. Reports and margins */}
-            <button
-              onClick={() => { setActiveTab('reports'); setIsSidebarOpen(false); }}
-              className={getSidebarTabClass('reports')}
-              title={isSidebarCollapsed ? "Financial Reports" : undefined}
-            >
-              <TrendingUp className="w-4.5 h-4.5 shrink-0" />
-              {showText && <span className="truncate">Financial Reports</span>}
-            </button>
+            {currentUser.role === 'admin' && (
+              <button
+                onClick={() => { setActiveTab('reports'); setIsSidebarOpen(false); }}
+                className={getSidebarTabClass('reports')}
+                title={isSidebarCollapsed ? "Financial Reports" : undefined}
+              >
+                <TrendingUp className="w-4.5 h-4.5 shrink-0" />
+                {showText && <span className="truncate">Financial Reports</span>}
+              </button>
+            )}
 
             {/* 5.5. Store Expenses Ledger */}
-            <button
-              onClick={() => { setActiveTab('expenses'); setIsSidebarOpen(false); }}
-              className={getSidebarTabClass('expenses')}
-              title={isSidebarCollapsed ? "Store Expenses" : undefined}
-            >
-              <Coins className="w-4.5 h-4.5 shrink-0" />
-              {showText && <span className="truncate">Store Expenses</span>}
-            </button>
+            {currentUser.role === 'admin' && (
+              <button
+                onClick={() => { setActiveTab('expenses'); setIsSidebarOpen(false); }}
+                className={getSidebarTabClass('expenses')}
+                title={isSidebarCollapsed ? "Store Expenses" : undefined}
+              >
+                <Coins className="w-4.5 h-4.5 shrink-0" />
+                {showText && <span className="truncate">Store Expenses</span>}
+              </button>
+            )}
 
             {/* 6. Active Shift Cashier Registry */}
-            <button
-              onClick={() => { setActiveTab('users'); setIsSidebarOpen(false); }}
-              className={getSidebarTabClass('users')}
-              title={isSidebarCollapsed ? "Shop Operators" : undefined}
-            >
-              <Users className="w-4.5 h-4.5 shrink-0" />
-              {showText && <span className="truncate">Shop Operators</span>}
-            </button>
+            {currentUser.role === 'admin' && (
+              <button
+                onClick={() => { setActiveTab('users'); setIsSidebarOpen(false); }}
+                className={getSidebarTabClass('users')}
+                title={isSidebarCollapsed ? "Shop Operators" : undefined}
+              >
+                <Users className="w-4.5 h-4.5 shrink-0" />
+                {showText && <span className="truncate">Shop Operators</span>}
+              </button>
+            )}
 
             {/* 7. Audit log table */}
-            <button
-              onClick={() => { setActiveTab('audit'); setIsSidebarOpen(false); }}
-              className={getSidebarTabClass('audit')}
-              title={isSidebarCollapsed ? "Security Audit Trails" : undefined}
-            >
-              <ShieldCheck className="w-4.5 h-4.5 shrink-0" />
-              {showText && <span className="truncate">Security Audit Trails</span>}
-            </button>
+            {currentUser.role === 'admin' && (
+              <button
+                onClick={() => { setActiveTab('audit'); setIsSidebarOpen(false); }}
+                className={getSidebarTabClass('audit')}
+                title={isSidebarCollapsed ? "Security Audit Trails" : undefined}
+              >
+                <ShieldCheck className="w-4.5 h-4.5 shrink-0" />
+                {showText && <span className="truncate">Security Audit Trails</span>}
+              </button>
+            )}
 
             {/* 8. Setup settings */}
-            <button
-              onClick={() => { setActiveTab('settings'); setIsSidebarOpen(false); }}
-              className={getSidebarTabClass('settings')}
-              title={isSidebarCollapsed ? "Shop Settings & DB" : undefined}
-            >
-              <Database className="w-4.5 h-4.5 shrink-0" />
-              {showText && <span className="truncate">Shop Settings &amp; DB</span>}
-            </button>
+            {currentUser.role === 'admin' && (
+              <button
+                onClick={() => { setActiveTab('settings'); setIsSidebarOpen(false); }}
+                className={getSidebarTabClass('settings')}
+                title={isSidebarCollapsed ? "Shop Settings & DB" : undefined}
+              >
+                <Database className="w-4.5 h-4.5 shrink-0" />
+                {showText && <span className="truncate">Shop Settings &amp; DB</span>}
+              </button>
+            )}
 
           </nav>
         </div>
@@ -1593,7 +1794,7 @@ export default function App() {
         <main className="flex-1 p-4 md:p-6" id="app-tab-container">
           
           {/* TAB: DASHBOARD MODULE */}
-          {activeTab === 'dashboard' && (
+          {activeTab === 'dashboard' && currentUser.role === 'admin' && (
             <Dashboard
               products={products}
               sales={sales}
@@ -1621,7 +1822,7 @@ export default function App() {
           )}
 
           {/* TAB: CATALOG MANAGEMENT */}
-          {activeTab === 'inventory' && (
+          {activeTab === 'inventory' && currentUser.role === 'admin' && (
             <Inventory
               products={products}
               categories={categories}
@@ -1635,7 +1836,7 @@ export default function App() {
           )}
 
           {/* TAB: FINANCIAL REPORTS */}
-          {(activeTab === 'reports' || activeTab === 'reports_ai') && (
+          {(activeTab === 'reports' || activeTab === 'reports_ai') && currentUser.role === 'admin' && (
             <Reports
               sales={sales}
               products={products}
@@ -1646,7 +1847,7 @@ export default function App() {
           )}
 
           {/* TAB: STORE EXPENSES LEDGER */}
-          {activeTab === 'expenses' && (
+          {activeTab === 'expenses' && currentUser.role === 'admin' && (
             <Expenses
               expenses={expenses}
               onAddExpense={handleRecordExpense}
@@ -1667,17 +1868,18 @@ export default function App() {
           )}
 
           {/* TAB: CASHIER USERS REGISTRY */}
-          {activeTab === 'users' && (
+          {activeTab === 'users' && currentUser.role === 'admin' && (
             <UsersComponent
               users={users}
               onAddUser={handleRegisterUser}
               onToggleUserStatus={handleToggleUserActiveShift}
+              onDeleteUser={handleDeleteUser}
               currentUserRole={currentUser.role}
             />
           )}
 
           {/* TAB: SECURITY AUDIT TRAILS */}
-          {activeTab === 'audit' && (
+          {activeTab === 'audit' && currentUser.role === 'admin' && (
             <AuditLogs
               logs={auditLogs}
               onClearLogs={handleClearAuditHistory}

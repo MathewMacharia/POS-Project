@@ -112,7 +112,7 @@ create table stock_logs (
 
 -- 11. Insert Default Admin and Cashier Profiles
 insert into profiles (id, username, full_name, role, pin) values
-  ('d3b07384-d113-4ec2-a5d2-f67332c9641d', 'admin', 'Erick Omondi', 'admin', '1234'),
+  ('d3b07384-d113-4ec2-a5d2-f67332c9641d', 'admin', 'admin', 'admin', '1234'),
   ('a8f9b90c-8438-4e89-8d7b-449e7b252062', 'cashier', 'Mercy Wanjiku', 'cashier', '5678');
 
 -- 12. Insert Default Categories
