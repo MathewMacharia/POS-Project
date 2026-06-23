@@ -106,7 +106,17 @@ export default function App() {
   // ----- 1. SHARED STATE FROM SUPABASE & LOCALSTORAGE FOR UI PREFS -----
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('dufuka_current_user');
-    return saved ? JSON.parse(saved) : null;
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed && (parsed.fullName === 'Erick Omondi' || parsed.fullName === 'Erick oMONDI' || parsed.fullName === 'Erick')) {
+          parsed.fullName = 'admin';
+          localStorage.setItem('dufuka_current_user', JSON.stringify(parsed));
+        }
+        return parsed;
+      } catch {}
+    }
+    return null;
   });
 
   const [products, setProducts] = useState<Product[]>([]);
@@ -181,7 +191,14 @@ export default function App() {
         getLocalCache('stock_logs')
       ]);
 
-      setUsers(u.map(mapProfile));
+      const sanitizedCached = u.map(profile => {
+        if (profile.username === 'admin' && (profile.full_name === 'Erick Omondi' || profile.full_name === 'Erick oMONDI' || profile.fullName === 'Erick Omondi' || profile.full_name === 'Erick')) {
+          profile.full_name = 'admin';
+          profile.fullName = 'admin';
+        }
+        return profile;
+      });
+      setUsers(sanitizedCached.map(mapProfile));
       setCategories(c.map(mapCategory));
       setProducts(p.map(mapProduct));
       setSales(s.map(mapSale));
@@ -201,8 +218,14 @@ export default function App() {
         const { data: profilesData } = await supabase.from('profiles').select('*');
         if (profilesData) {
           const merged = mergeRemoteWithSyncQueue('profiles', profilesData);
-          setUsers(merged.map(mapProfile));
-          setLocalCache('profiles', merged);
+          const sanitized = merged.map(p => {
+            if (p.username === 'admin' && (p.full_name === 'Erick Omondi' || p.full_name === 'Erick oMONDI' || p.full_name === 'Erick')) {
+              p.full_name = 'admin';
+            }
+            return p;
+          });
+          setUsers(sanitized.map(mapProfile));
+          setLocalCache('profiles', sanitized);
         }
 
         // Fetch categories
@@ -1437,32 +1460,6 @@ export default function App() {
               Unlock Shift Terminal
             </button>
           </form>
-
-          {/* Quick Setup testing profiles helpful tips */}
-          <div className="mt-6 pt-5 border-t border-zinc-150 dark:border-zinc-800 text-xs text-zinc-400 text-center" id="tester-tips-section">
-            <p className="font-semibold tracking-wider text-[10px] uppercase text-zinc-400 mb-2 flex items-center justify-center gap-1">
-              <Key className="w-4 h-4 text-emerald-500" />
-              Quick Select Tester Accounts:
-            </p>
-            <div className="grid grid-cols-2 gap-2 mt-1">
-              <button
-                type="button"
-                onClick={() => { setLoginUsername('admin'); setLoginPassword('1234'); }}
-                className="p-2 border border-dashed border-zinc-200 dark:border-zinc-800 hover:border-emerald-500 dark:hover:border-emerald-500 hover:bg-zinc-50 dark:hover:bg-zinc-800/40 rounded-lg text-left text-[11px] font-semibold transition cursor-pointer"
-              >
-                <span className="text-zinc-800 dark:text-zinc-200 block text-xs truncate">admin (Admin)</span>
-                <span className="text-[10px] text-zinc-400">@admin / 1234</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => { setLoginUsername('cashier'); setLoginPassword('5678'); }}
-                className="p-2 border border-dashed border-zinc-200 dark:border-zinc-800 hover:border-emerald-500 dark:hover:border-emerald-500 hover:bg-zinc-50 dark:hover:bg-zinc-800/40 rounded-lg text-left text-[11px] font-semibold transition cursor-pointer"
-              >
-                <span className="text-zinc-800 dark:text-zinc-200 block text-xs truncate">Jane Wambui (Cashier)</span>
-                <span className="text-[10px] text-zinc-400 font-mono">@cashier / 5678</span>
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     );
