@@ -6,7 +6,7 @@ interface AuditLogsProps {
   logs: AuditLog[];
   onClearLogs: () => void;
   currentUserRole: 'admin' | 'cashier';
-  onRestoreWipedData: (payload: string) => void;
+  onRestoreWipedData: (auditLogId: string) => void;
 }
 
 export default function AuditLogs({
@@ -128,7 +128,7 @@ export default function AuditLogs({
                             onClick={() => {
                               const confirmRestore = window.confirm("Je, ungependa kurejesha data hii iliyofutwa? Restore this wiped data version? Existing records will be merged.");
                               if (confirmRestore && log.restorePayload) {
-                                onRestoreWipedData(log.restorePayload);
+                                onRestoreWipedData(log.id);
                               }
                             }}
                             className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-md text-[10px] transition cursor-pointer"

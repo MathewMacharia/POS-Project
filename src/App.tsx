@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import bcrypt from 'bcryptjs';
 import { 
   Building, 
   Coins, 
@@ -76,7 +77,8 @@ import {
   mapSupplier, toDbSupplier,
   mapStockLog, toDbStockLog,
   getLocalCache, setLocalCache, db,
-  queueAction, triggerSync, mergeRemoteWithSyncQueue
+  queueAction, triggerSync, mergeRemoteWithSyncQueue,
+  apiFetch
 } from './utils/supabaseClient';
 
 function NairobiClock() {
@@ -100,6 +102,121 @@ function NairobiClock() {
   }, []);
 
   return <span>Nairobi: {time || '09:54 AM'}</span>;
+}
+
+// Helper functions for secure offline authentication using Web Crypto API
+// Key derivation: PBKDF2 with 10,000 iterations (trade-off accepted for supervised till terminals)
+const PBKDF2_ITERATIONS = 10000;
+const PBKDF2_HASH = 'SHA-256';
+const AES_GCM_ALGO = 'AES-GCM';
+
+// Helper to convert base64 to ArrayBuffer
+function base64ToBuffer(base64: string): ArrayBuffer {
+  const binaryString = window.atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+// Helper to convert ArrayBuffer to base64
+function bufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary);
+}
+
+// Derive AES-GCM key from plaintext PIN using PBKDF2
+async function deriveKeyFromPin(pin: string, salt: Uint8Array): Promise<CryptoKey> {
+  const encoder = new TextEncoder();
+  const baseKey = await window.crypto.subtle.importKey(
+    'raw',
+    encoder.encode(pin),
+    'PBKDF2',
+    false,
+    ['deriveKey']
+  );
+
+  // NOTE: Using 10,000 iterations is a deliberate, known trade-off for speed/performance 
+  // on low-power till hardware in supervised environments. This should be increased (e.g. to 600,000+)
+  // if deployed in unsupervised or higher-threat physical locations.
+  return window.crypto.subtle.deriveKey(
+    {
+      name: 'PBKDF2',
+      salt,
+      iterations: PBKDF2_ITERATIONS,
+      hash: PBKDF2_HASH
+    },
+    baseKey,
+    { name: AES_GCM_ALGO, length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
+// Encrypt payload using AES-GCM and derived key from PIN
+async function encryptProfileData(profile: any, pin: string): Promise<{ encryptedPayload: string, salt: string, iv: string }> {
+  const salt = window.crypto.getRandomValues(new Uint8Array(16));
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveKeyFromPin(pin, salt);
+
+  const encoder = new TextEncoder();
+  const payload = {
+    profile,
+    marker: 'pos-auth-success',
+    cachedAt: Date.now()
+  };
+  const encrypted = await window.crypto.subtle.encrypt(
+    {
+      name: AES_GCM_ALGO,
+      iv
+    },
+    key,
+    encoder.encode(JSON.stringify(payload))
+  );
+
+  return {
+    encryptedPayload: bufferToBase64(encrypted),
+    salt: bufferToBase64(salt.buffer),
+    iv: bufferToBase64(iv.buffer)
+  };
+}
+
+// Decrypt payload using AES-GCM and derived key from PIN
+async function decryptProfileData(encryptedPayload: string, salt: string, iv: string, pin: string): Promise<any> {
+  const saltBuffer = base64ToBuffer(salt);
+  const ivBuffer = base64ToBuffer(iv);
+  const payloadBuffer = base64ToBuffer(encryptedPayload);
+
+  const key = await deriveKeyFromPin(pin, new Uint8Array(saltBuffer));
+
+  const decryptedBuffer = await window.crypto.subtle.decrypt(
+    {
+      name: AES_GCM_ALGO,
+      iv: new Uint8Array(ivBuffer)
+    },
+    key,
+    payloadBuffer
+  );
+
+  const decoder = new TextDecoder();
+  const decryptedObj = JSON.parse(decoder.decode(decryptedBuffer));
+
+  if (decryptedObj.marker !== 'pos-auth-success') {
+    throw new Error('Authentication validation marker mismatch.');
+  }
+
+  // Enforce a strict 7-day expiration limit on cached offline credentials
+  const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+  if (Date.now() - decryptedObj.cachedAt > SEVEN_DAYS_MS) {
+    throw new Error('Offline credentials have expired (exceeded 7 days limit).');
+  }
+
+  return decryptedObj.profile;
 }
 
 export default function App() {
@@ -177,131 +294,149 @@ export default function App() {
   const [pinChangeError, setPinChangeError] = useState('');
 
   // ----- 2. LOAD DATA FROM SUPABASE ON MOUNT WITH OFFLINE CACHE -----
-  useEffect(() => {
-    async function loadData() {
-      // Load from local cache immediately so app starts instantly (even offline)
-      const [u, c, p, s, e, al, sup, sl] = await Promise.all([
-        getLocalCache('profiles'),
-        getLocalCache('categories'),
-        getLocalCache('products'),
-        getLocalCache('sales'),
-        getLocalCache('expenses'),
-        getLocalCache('audit_logs'),
-        getLocalCache('suppliers'),
-        getLocalCache('stock_logs')
-      ]);
+  const loadData = useCallback(async () => {
+    // Load from local cache immediately so app starts instantly (even offline)
+    const [u, c, p, s, e, al, sup, sl] = await Promise.all([
+      getLocalCache('profiles'),
+      getLocalCache('categories'),
+      getLocalCache('products'),
+      getLocalCache('sales'),
+      getLocalCache('expenses'),
+      getLocalCache('audit_logs'),
+      getLocalCache('suppliers'),
+      getLocalCache('stock_logs')
+    ]);
 
-      const sanitizedCached = u.map(profile => {
-        if (profile.username === 'admin' && (profile.full_name === 'Erick Omondi' || profile.full_name === 'Erick oMONDI' || profile.fullName === 'Erick Omondi' || profile.full_name === 'Erick')) {
-          profile.full_name = 'admin';
-          profile.fullName = 'admin';
-        }
-        return profile;
-      });
-      setUsers(sanitizedCached.map(mapProfile));
-      setCategories(c.map(mapCategory));
-      setProducts(p.map(mapProduct));
-      setSales(s.map(mapSale));
-      setExpenses(e.map(mapExpense));
-      setAuditLogs(al.map(mapAuditLog));
-      setSuppliers(sup.map(mapSupplier));
-      setStockLogs(sl.map(mapStockLog));
+    const sanitizedCached = u.map(profile => {
+      if (profile.username === 'admin' && (profile.full_name === 'Erick Omondi' || profile.full_name === 'Erick oMONDI' || profile.fullName === 'Erick Omondi' || profile.full_name === 'Erick')) {
+        profile.full_name = 'admin';
+        profile.fullName = 'admin';
+      }
+      return profile;
+    });
+    setUsers(sanitizedCached.map(mapProfile));
+    setCategories(c.map(mapCategory));
+    setProducts(p.map(mapProduct));
+    setSales(s.map(mapSale));
+    setExpenses(e.map(mapExpense));
+    setAuditLogs(al.map(mapAuditLog));
+    setSuppliers(sup.map(mapSupplier));
+    setStockLogs(sl.map(mapStockLog));
 
-      if (!navigator.onLine) return;
+    if (!navigator.onLine) return;
 
-      try {
-        // Trigger and await sync for any unsynced offline changes first
-        // so that they are written to Supabase before we query remote state
-        await triggerSync();
+    try {
+      // Trigger and await sync for any unsynced offline changes first
+      await triggerSync();
 
-        // Fetch profiles (users)
-        const { data: profilesData } = await supabase.from('profiles').select('*');
-        if (profilesData) {
-          const merged = mergeRemoteWithSyncQueue('profiles', profilesData);
-          const sanitized = merged.map(p => {
-            if (p.username === 'admin' && (p.full_name === 'Erick Omondi' || p.full_name === 'Erick oMONDI' || p.full_name === 'Erick')) {
-              p.full_name = 'admin';
-            }
-            return p;
-          });
-          setUsers(sanitized.map(mapProfile));
-          setLocalCache('profiles', sanitized);
-        }
+      // Fetch public tables (categories and products) directly via Supabase (since select policy is open to all)
+      const { data: categoriesData } = await supabase.from('categories').select('*');
+      if (categoriesData) {
+        const merged = mergeRemoteWithSyncQueue('categories', categoriesData);
+        setCategories(merged.map(mapCategory));
+        setLocalCache('categories', merged);
+      }
 
-        // Fetch categories
-        const { data: categoriesData } = await supabase.from('categories').select('*');
-        if (categoriesData) {
-          const merged = mergeRemoteWithSyncQueue('categories', categoriesData);
-          setCategories(merged.map(mapCategory));
-          setLocalCache('categories', merged);
-        }
+      const { data: productsData } = await supabase.from('products').select('*');
+      if (productsData) {
+        const merged = mergeRemoteWithSyncQueue('products', productsData);
+        setProducts(merged.map(mapProduct));
+        await setLocalCache('products', merged);
+      }
 
-        // Fetch products
-        const { data: productsData } = await supabase.from('products').select('*');
-        if (productsData) {
-          console.log('[Supabase Load] Products fetched from Supabase:', JSON.stringify(productsData.map(p => ({ id: p.id, name: p.name, quantity_in_stock: p.quantity_in_stock }))));
-          const merged = mergeRemoteWithSyncQueue('products', productsData);
-          console.log('[Supabase Load] Products merged with sync queue:', JSON.stringify(merged.map(p => ({ id: p.id, name: p.name, quantity_in_stock: p.quantity_in_stock }))));
-
-          // Log current Dexie values before overwrite
-          try {
-            for (const p of merged) {
-              const currentLocal = await db.products.get(p.id);
-              if (currentLocal) {
-                console.log(`[Dexie Overwrite Log] Product ${p.name} (${p.id}): current local quantity=${currentLocal.quantity_in_stock}, new overwrite quantity=${p.quantity_in_stock}`);
+      // Fetch role-scoped tables via authenticated REST endpoints
+      if (currentUser) {
+        if (currentUser.role === 'admin') {
+          // Fetch profiles
+          const profilesData = await apiFetch('/api/profiles');
+          if (profilesData) {
+            const merged = mergeRemoteWithSyncQueue('profiles', profilesData);
+            const sanitized = merged.map((p: any) => {
+              if (p.username === 'admin' && (p.full_name === 'Erick Omondi' || p.full_name === 'Erick oMONDI' || p.full_name === 'Erick')) {
+                p.full_name = 'admin';
               }
-            }
-          } catch (e) {
-            console.warn('[Diagnostic only - non-fatal]', e);
+              return p;
+            });
+            setUsers(sanitized.map(mapProfile));
+            setLocalCache('profiles', sanitized);
           }
 
-          setProducts(merged.map(mapProduct));
-          await setLocalCache('products', merged);
-        }
+          // Fetch sales
+          const salesData = await apiFetch('/api/sales');
+          if (salesData) {
+            const merged = mergeRemoteWithSyncQueue('sales', salesData);
+            setSales(merged.map(mapSale));
+            setLocalCache('sales', merged);
+          }
 
-        // Fetch sales
-        const { data: salesData } = await supabase.from('sales').select('*');
-        if (salesData) {
-          const merged = mergeRemoteWithSyncQueue('sales', salesData);
-          setSales(merged.map(mapSale));
-          setLocalCache('sales', merged);
-        }
+          // Fetch expenses
+          const expensesData = await apiFetch('/api/expenses');
+          if (expensesData) {
+            const merged = mergeRemoteWithSyncQueue('expenses', expensesData);
+            setExpenses(merged.map(mapExpense));
+            setLocalCache('expenses', merged);
+          }
 
-        // Fetch expenses
-        const { data: expensesData } = await supabase.from('expenses').select('*');
-        if (expensesData) {
-          const merged = mergeRemoteWithSyncQueue('expenses', expensesData);
-          setExpenses(merged.map(mapExpense));
-          setLocalCache('expenses', merged);
-        }
+          // Fetch audit logs
+          const auditData = await apiFetch('/api/audit-logs');
+          if (auditData) {
+            const merged = mergeRemoteWithSyncQueue('audit_logs', auditData);
+            setAuditLogs(merged.map(mapAuditLog));
+            setLocalCache('audit_logs', merged);
+          }
 
-        // Fetch audit logs
-        const { data: auditData } = await supabase.from('audit_logs').select('*');
-        if (auditData) {
-          const merged = mergeRemoteWithSyncQueue('audit_logs', auditData);
-          setAuditLogs(merged.map(mapAuditLog));
-          setLocalCache('audit_logs', merged);
-        }
+          // Fetch suppliers
+          const suppliersData = await apiFetch('/api/suppliers');
+          if (suppliersData) {
+            const merged = mergeRemoteWithSyncQueue('suppliers', suppliersData);
+            setSuppliers(merged.map(mapSupplier));
+            setLocalCache('suppliers', merged);
+          }
 
-        // Fetch suppliers
-        const { data: suppliersData } = await supabase.from('suppliers').select('*');
-        if (suppliersData) {
-          const merged = mergeRemoteWithSyncQueue('suppliers', suppliersData);
-          setSuppliers(merged.map(mapSupplier));
-          setLocalCache('suppliers', merged);
-        }
+          // Fetch stock logs
+          const stockLogsData = await apiFetch('/api/stock-logs');
+          if (stockLogsData) {
+            const merged = mergeRemoteWithSyncQueue('stock_logs', stockLogsData);
+            setStockLogs(merged.map(mapStockLog));
+            setLocalCache('stock_logs', merged);
+          }
+        } else if (currentUser.role === 'cashier') {
+          // Cashier scopes: only fetch today's own sales and today's stock logs
+          const salesData = await apiFetch('/api/sales');
+          if (salesData) {
+            const merged = mergeRemoteWithSyncQueue('sales', salesData);
+            setSales(merged.map(mapSale));
+            setLocalCache('sales', merged);
+          }
 
-        // Fetch stock logs
-        const { data: stockLogsData } = await supabase.from('stock_logs').select('*');
-        if (stockLogsData) {
-          const merged = mergeRemoteWithSyncQueue('stock_logs', stockLogsData);
-          setStockLogs(merged.map(mapStockLog));
-          setLocalCache('stock_logs', merged);
+          const stockLogsData = await apiFetch('/api/stock-logs');
+          if (stockLogsData) {
+            const merged = mergeRemoteWithSyncQueue('stock_logs', stockLogsData);
+            setStockLogs(merged.map(mapStockLog));
+            setLocalCache('stock_logs', merged);
+          }
+
+          // Clear admin-only state data from memory to prevent caching mixups
+          setUsers([currentUser]);
+          setExpenses([]);
+          setAuditLogs([]);
+          setSuppliers([]);
         }
-      } catch (err) {
-        console.error("Error loading data from Supabase:", err);
+      } else {
+        // If not logged in, clear authenticated state lists
+        setUsers([]);
+        setSales([]);
+        setExpenses([]);
+        setAuditLogs([]);
+        setSuppliers([]);
+        setStockLogs([]);
       }
+    } catch (err) {
+      console.error("Error loading data from server/Supabase:", err);
     }
+  }, [currentUser]);
+
+  useEffect(() => {
     loadData();
 
     // Sync listener when device comes back online
@@ -311,7 +446,7 @@ export default function App() {
     };
     window.addEventListener('online', handleOnline);
     return () => window.removeEventListener('online', handleOnline);
-  }, []);
+  }, [loadData]);
 
   // UI preferences persistence
   useEffect(() => {
@@ -366,7 +501,7 @@ export default function App() {
       setLocalCache('audit_logs', updated.map(toDbAuditLog));
       return updated;
     });
-    queueAction('insert', 'audit_logs', toDbAuditLog(newLog));
+    // Audit logs are generated server-side on API writes to prevent client tampering.
   }, [currentUser]);
 
   // ----- 3. LOGIN / OVERRIDE CREDENTIAL CHECKS -----
@@ -382,81 +517,152 @@ export default function App() {
     const usernameLower = loginUsername.trim().toLowerCase();
 
     try {
-      let profile: any = null;
-
       if (navigator.onLine) {
-        try {
-          const { data, error } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('username', usernameLower)
-            .single();
+        // Online login: Authenticate via server-side secure route
+        const resp = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            username: usernameLower,
+            pin: loginPassword
+          })
+        });
 
-          if (!error && data) {
-            profile = data;
+        const data = await resp.json();
+
+        if (!resp.ok) {
+          setLoginError(data.error || "Invalid username or PIN.");
+          return;
+        }
+
+        const { token, user } = data;
+        setCurrentUser(user);
+        localStorage.setItem('dufuka_current_user', JSON.stringify(user));
+        localStorage.setItem('dufuka_auth_token', token);
+
+        // Cache credentials securely for offline verification using PIN-derived key encryption
+        try {
+          const encryptedData = await encryptProfileData(user, loginPassword);
+          const cachedProfiles = await getLocalCache('profiles');
+          const filtered = cachedProfiles.filter(p => p.username.toLowerCase() !== usernameLower);
+          
+          filtered.push({
+            id: user.id,
+            username: user.username,
+            full_name: user.fullName,
+            email: user.email,
+            role: user.role,
+            phone: user.phone,
+            active: user.active,
+            salt: encryptedData.salt,
+            iv: encryptedData.iv,
+            encryptedPayload: encryptedData.encryptedPayload
+          });
+
+          await setLocalCache('profiles', filtered);
+          setUsers(filtered.map(mapProfile));
+        } catch (cryptoErr) {
+          console.error("Failed to securely cache offline credentials:", cryptoErr);
+        }
+
+        const msg = `Operator ${user.fullName} successfully logged into ${user.role === 'admin' ? 'administrator' : 'cashier terminal'} desk.`;
+        
+        const newAuditLog: AuditLog = {
+          id: crypto.randomUUID(),
+          userId: user.id,
+          userName: user.fullName,
+          action: 'User Login',
+          details: msg,
+          timestamp: new Date().toISOString()
+        };
+        
+        setAuditLogs(prev => {
+          const updated = [...prev, newAuditLog];
+          setLocalCache('audit_logs', updated.map(toDbAuditLog));
+          return updated;
+        });
+
+        if (user.role === 'admin') {
+          setActiveTab('dashboard');
+        } else {
+          setActiveTab('pos');
+        }
+
+        // Check for first-time login passcode change
+        if (user.username === 'admin' && loginPassword === '1234') {
+          setPinChangeUsername('admin');
+          setShowChangeDefaultPin(true);
+          return;
+        }
+
+        setLoginUsername('');
+        setLoginPassword('');
+      } else {
+        // Offline login: Read credentials from offline cached profiles in Dexie
+        const cachedProfiles = await getLocalCache('profiles');
+        const cachedUser = cachedProfiles.find(p => p.username.toLowerCase() === usernameLower);
+
+        if (!cachedUser) {
+          setLoginError('No offline credentials found. Please log in online at least once to enable offline access on this device.');
+          return;
+        }
+
+        if (!cachedUser.active) {
+          setLoginError('Account status is locked. Kindly contact Supervisor / Admin.');
+          return;
+        }
+
+        try {
+          // Decrypt user profile using the entered PIN
+          const decryptedProfile = await decryptProfileData(
+            cachedUser.encryptedPayload,
+            cachedUser.salt,
+            cachedUser.iv,
+            loginPassword
+          );
+
+          setCurrentUser(decryptedProfile);
+          localStorage.setItem('dufuka_current_user', JSON.stringify(decryptedProfile));
+          
+          const msg = `Operator ${decryptedProfile.fullName} successfully logged in offline to ${decryptedProfile.role === 'admin' ? 'administrator' : 'cashier terminal'} desk.`;
+          
+          const newAuditLog: AuditLog = {
+            id: crypto.randomUUID(),
+            userId: decryptedProfile.id,
+            userName: decryptedProfile.fullName,
+            action: 'User Login Offline',
+            details: msg,
+            timestamp: new Date().toISOString()
+          };
+          
+          setAuditLogs(prev => {
+            const updated = [...prev, newAuditLog];
+            setLocalCache('audit_logs', updated.map(toDbAuditLog));
+            return updated;
+          });
+
+          if (decryptedProfile.role === 'admin') {
+            setActiveTab('dashboard');
+          } else {
+            setActiveTab('pos');
           }
-        } catch {
-          // Fallback to cache if network fetch fails
+
+          // Check for first-time login passcode change
+          if (decryptedProfile.username === 'admin' && loginPassword === '1234') {
+            setPinChangeUsername('admin');
+            setShowChangeDefaultPin(true);
+            return;
+          }
+
+          setLoginUsername('');
+          setLoginPassword('');
+        } catch (decryptErr: any) {
+          console.warn("Offline login failed during decryption:", decryptErr);
+          setLoginError('Incorrect PIN passcode entered or credentials expired.');
         }
       }
-
-      if (!profile) {
-        const cachedProfiles = await getLocalCache('profiles');
-        profile = cachedProfiles.find(p => p.username.toLowerCase() === usernameLower);
-      }
-
-      if (!profile) {
-        setLoginError('Operator username not found on directory.');
-        return;
-      }
-
-      if (!profile.active) {
-        setLoginError('Account status is locked. Kindly contact Supervisor / Admin.');
-        return;
-      }
-
-      // Check for first-time login passcode setup for super admin
-      if (profile.username === 'admin' && profile.pin === '1234' && loginPassword === '1234') {
-        setPinChangeUsername('admin');
-        setShowChangeDefaultPin(true);
-        return;
-      }
-
-      if (loginPassword !== profile.pin) {
-        setLoginError('Incorrect PIN passcode entered.');
-        return;
-      }
-
-      const foundUser = mapProfile(profile);
-      setCurrentUser(foundUser);
-      localStorage.setItem('dufuka_current_user', JSON.stringify(foundUser));
-      
-      const msg = `Operator ${foundUser.fullName} successfully logged into ${foundUser.role === 'admin' ? 'administrator' : 'cashier terminal'} desk.`;
-      
-      const newAuditLog: AuditLog = {
-        id: crypto.randomUUID(),
-        userId: foundUser.id,
-        userName: foundUser.fullName,
-        action: 'User Login',
-        details: msg,
-        timestamp: new Date().toISOString()
-      };
-      
-      setAuditLogs(prev => {
-        const updated = [...prev, newAuditLog];
-        setLocalCache('audit_logs', updated.map(toDbAuditLog));
-        return updated;
-      });
-      queueAction('insert', 'audit_logs', toDbAuditLog(newAuditLog));
-
-      if (foundUser.role === 'admin') {
-        setActiveTab('dashboard');
-      } else {
-        setActiveTab('pos');
-      }
-
-      setLoginUsername('');
-      setLoginPassword('');
     } catch (err: any) {
       setLoginError('Authentication error: ' + err.message);
     }
@@ -482,10 +688,11 @@ export default function App() {
     }
 
     try {
+      const hashedPin = bcrypt.hashSync(newPin.trim(), 10);
       if (navigator.onLine) {
         const { error } = await supabase
           .from('profiles')
-          .update({ pin: newPin.trim() })
+          .update({ pin: hashedPin })
           .eq('username', pinChangeUsername);
         
         if (error) throw error;
@@ -493,14 +700,14 @@ export default function App() {
         const cached = await getLocalCache('profiles');
         const userProf = cached.find(p => p.username === pinChangeUsername);
         if (userProf) {
-          queueAction('update', 'profiles', { pin: newPin.trim() }, userProf.id);
+          queueAction('update', 'profiles', { pin: hashedPin }, userProf.id);
         }
       }
 
       const cachedProfiles = await getLocalCache('profiles');
       const updated = cachedProfiles.map(p => {
         if (p.username === pinChangeUsername) {
-          return { ...p, pin: newPin.trim() };
+          return { ...p, pin: hashedPin };
         }
         return p;
       });
@@ -525,6 +732,7 @@ export default function App() {
     setCurrentUser(null);
     localStorage.removeItem('dufuka_current_user');
     localStorage.removeItem('dufuka_active_tab');
+    localStorage.removeItem('dufuka_auth_token');
   };
 
   // ----- 4. CORE POS ACTION: CHECKOUT TRIGGER -----
@@ -608,38 +816,7 @@ export default function App() {
         return updated;
       });
 
-      // 4. Batch append sync queue items directly to localStorage to avoid concurrency bugs
-      const syncQueueStr = localStorage.getItem('dufuka_sync_queue');
-      const queue = syncQueueStr ? JSON.parse(syncQueueStr) : [];
-
-      // Add product updates to queue
-      cartItems.forEach(item => {
-        const p = products.find(prod => prod.id === item.id);
-        if (p) {
-          const newQty = Math.max(0, p.quantityInStock - item.quantity);
-          queue.push({
-            id: `sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            action: 'update',
-            table: 'products',
-            payload: { quantity_in_stock: newQty },
-            targetId: p.id
-          });
-        }
-      });
-
-      // Add stock logs to queue
-      newStockLogsToSave.forEach(log => {
-        queue.push({
-          id: `sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          action: 'insert',
-          table: 'stock_logs',
-          payload: toDbStockLog(log)
-        });
-      });
-
-      localStorage.setItem('dufuka_sync_queue', JSON.stringify(queue));
-
-      // Finally queue the sale insert (this will trigger triggerSync() for the whole batch)
+      // 4. Queue the sale insert (this will trigger triggerSync() for the whole batch which updates stocks server-side)
       queueAction('insert', 'sales', toDbSale(newSale));
 
       // 5. Attach Security Audit Trail
@@ -924,10 +1101,11 @@ export default function App() {
   // ----- 6. USER/CASHIER MANAGEMENT ACTIONS -----
   const handleRegisterUser = async (newUserFields: Omit<User, 'id'> & { pin: string }) => {
     const userId = crypto.randomUUID();
+    const hashedPin = bcrypt.hashSync(newUserFields.pin, 10);
     const completeUser = {
       ...newUserFields,
       id: userId,
-      pin: newUserFields.pin
+      pin: hashedPin
     };
 
     try {
@@ -1056,195 +1234,69 @@ export default function App() {
 
   // Clear Audit log history action
   const handleClearAuditHistory = () => {
-    setAuditLogs([]);
-    const freshLog: AuditLog = {
-      id: `aud_${Date.now()}`,
-      userId: currentUser?.id || 'admin',
-      userName: currentUser?.fullName || 'Admin',
-      action: 'Log Purge',
-      details: 'Audit logs wiped clean by administrator override.',
-      timestamp: new Date().toISOString()
-    };
-    setAuditLogs([freshLog]);
+    handleClearSection('audit');
   };
 
   // Clear specific section data action (Admin override only)
   const handleClearSection = async (section: 'sales' | 'products' | 'expenses' | 'suppliers' | 'audit') => {
-    let backupData: any = null;
-    let label = '';
-    
-    if (section === 'sales') {
-      backupData = { sales, stockLogs };
-      label = 'Sales & Stock Logs';
-    } else if (section === 'products') {
-      backupData = { products };
-      label = 'Products Catalog';
-    } else if (section === 'expenses') {
-      backupData = { expenses };
-      label = 'Expenses Ledger';
-    } else if (section === 'suppliers') {
-      backupData = { suppliers };
-      label = 'Suppliers Registry';
-    } else if (section === 'audit') {
-      backupData = { auditLogs };
-      label = 'Security Audit Logs';
+    if (!navigator.onLine) {
+      alert("Network connection is required to execute a secure database wipe.");
+      return;
     }
 
-    const restorePayload = JSON.stringify({ section, data: backupData });
+    const confirmPin = window.prompt(`To authorize this database purge for ${section}, please enter your Admin PIN:`);
+    if (!confirmPin) return;
+
+    let startDate = '';
+    let endDate = '';
+    if (section !== 'suppliers') {
+      startDate = window.prompt("Enter deletion Start Date (YYYY-MM-DD):", "2026-01-01") || "";
+      if (!startDate) return;
+      endDate = window.prompt("Enter deletion End Date (YYYY-MM-DD):", "2026-12-31") || "";
+      if (!endDate) return;
+    }
 
     try {
-      // 1. Wipe local state & local cache
-      if (section === 'sales') {
-        setSales([]);
-        setStockLogs([]);
-        setLocalCache('sales', []);
-        setLocalCache('stock_logs', []);
-        
-        // Deletions online / offline queue
-        if (navigator.onLine) {
-          await supabase.from('sales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-          await supabase.from('stock_logs').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        } else {
-          sales.forEach(s => queueAction('delete', 'sales', null, s.id));
-          stockLogs.forEach(sl => queueAction('delete', 'stock_logs', null, sl.id));
-        }
-      } else if (section === 'products') {
-        setProducts([]);
-        setLocalCache('products', []);
-        if (navigator.onLine) {
-          await supabase.from('products').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        } else {
-          products.forEach(p => queueAction('delete', 'products', null, p.id));
-        }
-      } else if (section === 'expenses') {
-        setExpenses([]);
-        setLocalCache('expenses', []);
-        if (navigator.onLine) {
-          await supabase.from('expenses').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        } else {
-          expenses.forEach(e => queueAction('delete', 'expenses', null, e.id));
-        }
-      } else if (section === 'suppliers') {
-        setSuppliers([]);
-        setLocalCache('suppliers', []);
-        if (navigator.onLine) {
-          await supabase.from('suppliers').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        } else {
-          suppliers.forEach(s => queueAction('delete', 'suppliers', null, s.id));
-        }
-      } else if (section === 'audit') {
-        setAuditLogs([]);
-        setLocalCache('audit_logs', []);
-        if (navigator.onLine) {
-          await supabase.from('audit_logs').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        } else {
-          auditLogs.forEach(a => queueAction('delete', 'audit_logs', null, a.id));
-        }
-      }
-
-      // 2. Add an audit log entry for the purge that includes the restorePayload
-      const freshLog: AuditLog = {
-        id: crypto.randomUUID(),
-        userId: currentUser?.id || 'admin',
-        userName: currentUser?.fullName || 'Admin',
-        action: 'Section Purged',
-        details: `${label} wiped clean by administrator override. Version backup created.`,
-        timestamp: new Date().toISOString(),
-        restorePayload: restorePayload
-      };
-
-      setAuditLogs(prev => {
-        const filtered = prev.filter(l => section === 'audit' ? false : true);
-        const updated = [...filtered, freshLog];
-        setLocalCache('audit_logs', updated.map(toDbAuditLog));
-        return updated;
+      const res = await apiFetch('/api/data/wipe', {
+        method: 'POST',
+        body: JSON.stringify({
+          section,
+          confirmPin,
+          startDate: startDate || undefined,
+          endDate: endDate || undefined
+        })
       });
-      queueAction('insert', 'audit_logs', toDbAuditLog(freshLog));
 
-      alert(`${label} cleared successfully!`);
+      alert(res.message || 'Records cleared successfully!');
+      // Reload fresh database state from the server
+      await loadData();
     } catch (err: any) {
-      alert(`Failed to clear ${label}: ` + err.message);
+      alert(`Failed to clear records: ` + err.message);
     }
   };
 
   // Restore specific section data action (Admin override only)
-  const handleRestoreWipedData = async (payloadStr: string) => {
+  const handleRestoreWipedData = async (auditLogId: string) => {
+    if (!navigator.onLine) {
+      alert("Network connection is required to restore database records.");
+      return;
+    }
+
+    const confirmPin = window.prompt("To authorize database restoration, please enter your Admin PIN:");
+    if (!confirmPin) return;
+
     try {
-      const { section, data } = JSON.parse(payloadStr);
-      if (section === 'sales') {
-        const restoredSales = data.sales || [];
-        const restoredLogs = data.stockLogs || [];
-        setSales(prev => {
-          const merged = [...prev];
-          restoredSales.forEach((s: Sale) => {
-            if (!merged.some(x => x.id === s.id)) merged.push(s);
-          });
-          setLocalCache('sales', merged.map(toDbSale));
-          return merged;
-        });
-        setStockLogs(prev => {
-          const merged = [...prev];
-          restoredLogs.forEach((sl: StockLog) => {
-            if (!merged.some(x => x.id === sl.id)) merged.push(sl);
-          });
-          setLocalCache('stock_logs', merged.map(toDbStockLog));
-          return merged;
-        });
-        
-        restoredSales.forEach((s: Sale) => queueAction('insert', 'sales', toDbSale(s)));
-        restoredLogs.forEach((sl: StockLog) => queueAction('insert', 'stock_logs', toDbStockLog(sl)));
+      const res = await apiFetch('/api/audit-logs/restore', {
+        method: 'POST',
+        body: JSON.stringify({
+          auditLogId,
+          confirmPin
+        })
+      });
 
-      } else if (section === 'products') {
-        const restoredProducts = data.products || [];
-        setProducts(prev => {
-          const merged = [...prev];
-          restoredProducts.forEach((p: Product) => {
-            if (!merged.some(x => x.id === p.id)) merged.push(p);
-          });
-          setLocalCache('products', merged.map(toDbProduct));
-          return merged;
-        });
-        restoredProducts.forEach((p: Product) => queueAction('insert', 'products', toDbProduct(p)));
-
-      } else if (section === 'expenses') {
-        const restoredExpenses = data.expenses || [];
-        setExpenses(prev => {
-          const merged = [...prev];
-          restoredExpenses.forEach((e: Expense) => {
-            if (!merged.some(x => x.id === e.id)) merged.push(e);
-          });
-          setLocalCache('expenses', merged.map(toDbExpense));
-          return merged;
-        });
-        restoredExpenses.forEach((e: Expense) => queueAction('insert', 'expenses', toDbExpense(e)));
-
-      } else if (section === 'suppliers') {
-        const restoredSuppliers = data.suppliers || [];
-        setSuppliers(prev => {
-          const merged = [...prev];
-          restoredSuppliers.forEach((s: Supplier) => {
-            if (!merged.some(x => x.id === s.id)) merged.push(s);
-          });
-          setLocalCache('suppliers', merged.map(toDbSupplier));
-          return merged;
-        });
-        restoredSuppliers.forEach((s: Supplier) => queueAction('insert', 'suppliers', toDbSupplier(s)));
-
-      } else if (section === 'audit') {
-        const restoredAudits = data.auditLogs || [];
-        setAuditLogs(prev => {
-          const merged = [...prev];
-          restoredAudits.forEach((a: AuditLog) => {
-            if (!merged.some(x => x.id === a.id)) merged.push(a);
-          });
-          setLocalCache('audit_logs', merged.map(toDbAuditLog));
-          return merged;
-        });
-        restoredAudits.forEach((a: AuditLog) => queueAction('insert', 'audit_logs', toDbAuditLog(a)));
-      }
-
-      addAuditLog('Restore Wiped Data', `Restored cleared database snapshot for ${section} section.`);
-      alert('Data restored successfully!');
+      alert(res.message || 'Data restored successfully!');
+      // Reload fresh database state from the server
+      await loadData();
     } catch (err: any) {
       alert('Failed to restore wiped data: ' + err.message);
     }

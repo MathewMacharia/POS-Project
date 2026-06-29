@@ -112,8 +112,8 @@ create table stock_logs (
 
 -- 11. Insert Default Admin and Cashier Profiles
 insert into profiles (id, username, full_name, role, pin) values
-  ('d3b07384-d113-4ec2-a5d2-f67332c9641d', 'admin', 'admin', 'admin', '1234'),
-  ('a8f9b90c-8438-4e89-8d7b-449e7b252062', 'cashier', 'Mercy Wanjiku', 'cashier', '5678');
+  ('d3b07384-d113-4ec2-a5d2-f67332c9641d', 'admin', 'admin', 'admin', '$2b$10$Wbny7vXXc5CJgwquwGNxresNnbaQEoavVdvSWbZ5AYkTvPll6Idr.'),
+  ('a8f9b90c-8438-4e89-8d7b-449e7b252062', 'cashier', 'Mercy Wanjiku', 'cashier', '$2b$10$RJs9eFtq2CJeTegwT0jrL.QVvjv1mn1.LoPHsO66vs/qRiKnCB5bG');
 
 -- 12. Insert Default Categories
 insert into categories (name, is_custom) values
@@ -123,3 +123,26 @@ insert into categories (name, is_custom) values
   ('Bakery', false),
   ('Snacks', false),
   ('Household', false);
+
+-- 13. Enable Row Level Security (RLS) on all tables
+alter table profiles enable row level security;
+alter table categories enable row level security;
+alter table products enable row level security;
+alter table sales enable row level security;
+alter table expenses enable row level security;
+alter table audit_logs enable row level security;
+alter table suppliers enable row level security;
+alter table stock_logs enable row level security;
+
+-- 14. Define RLS Policies
+
+-- categories: allow anyone (including anon) to SELECT. No write operations.
+create policy "Allow read access to categories" on categories
+  for select using (true);
+
+-- products: allow anyone (including anon) to SELECT. No write operations.
+create policy "Allow read access to products" on products
+  for select using (true);
+
+-- Note: No policies are created for profiles, sales, expenses, audit_logs, suppliers, and stock_logs.
+-- Since RLS is enabled, this completely blocks all operations (SELECT/INSERT/UPDATE/DELETE) for the public anon role.

@@ -334,6 +334,27 @@ function isTransientError(error: any): boolean {
   );
 }
 
+export async function apiFetch(path: string, options: RequestInit = {}) {
+  const token = localStorage.getItem('dufuka_auth_token');
+  const headers = new Headers(options.headers || {});
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+  headers.set('Content-Type', 'application/json');
+  
+  const res = await fetch(path, {
+    ...options,
+    headers
+  });
+  
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || `Request failed with status ${res.status}`);
+  }
+  
+  return res.json();
+}
+
 export async function triggerSync(onSyncSuccess?: () => void) {
   if (isSyncing || !navigator.onLine) return;
   isSyncing = true;
@@ -358,49 +379,147 @@ export async function triggerSync(onSyncSuccess?: () => void) {
       }
 
       try {
-        if (item.action === 'insert') {
-          const { error } = await supabase.from(item.table).upsert([item.payload]);
-          if (error) {
-            console.error(`[Offline Sync] Insert/Upsert error for ${item.table}:`, error);
-            if (error.code === '23505') {
-              console.warn(`[Offline Sync] Row already exists in ${item.table}. Skipping queue item.`);
-            } else if (isTransientError(error)) {
-              throw new Error(`Transient: ${error.message || 'database timeout'}`);
-            }
+        if (item.table === 'sales' && item.action === 'insert') {
+          await apiFetch('/api/sales', {
+            method: 'POST',
+            body: JSON.stringify(item.payload)
+          });
+        } else if (item.table === 'products') {
+          if (item.action === 'insert') {
+            await apiFetch('/api/products', {
+              method: 'POST',
+              body: JSON.stringify({
+                id: item.payload.id,
+                name: item.payload.name,
+                category: item.payload.category,
+                barcode: item.payload.barcode,
+                buyingPrice: item.payload.buying_price,
+                sellingPrice: item.payload.selling_price,
+                quantityInStock: item.payload.quantity_in_stock,
+                supplierName: item.payload.supplier_name,
+                description: item.payload.description,
+                imageUrl: item.payload.image_url,
+                expiryDate: item.payload.expiry_date
+              })
+            });
+          } else if (item.action === 'update') {
+            await apiFetch(`/api/products/${item.targetId}`, {
+              method: 'PUT',
+              body: JSON.stringify({
+                name: item.payload.name,
+                category: item.payload.category,
+                barcode: item.payload.barcode,
+                buyingPrice: item.payload.buying_price,
+                sellingPrice: item.payload.selling_price,
+                quantityInStock: item.payload.quantity_in_stock,
+                supplierName: item.payload.supplier_name,
+                description: item.payload.description,
+                imageUrl: item.payload.image_url,
+                expiryDate: item.payload.expiry_date
+              })
+            });
+          } else if (item.action === 'delete') {
+            await apiFetch(`/api/products/${item.targetId}`, {
+              method: 'DELETE'
+            });
           }
-        } else if (item.action === 'update') {
-          if (item.table === 'products') {
-            console.log(`[Supabase Sync Push] Attempting update for products: id=${item.targetId}, payload=`, JSON.stringify(item.payload));
+        } else if (item.table === 'profiles') {
+          if (item.action === 'insert') {
+            await apiFetch('/api/profiles', {
+              method: 'POST',
+              body: JSON.stringify({
+                username: item.payload.username,
+                fullName: item.payload.full_name,
+                email: item.payload.email,
+                role: item.payload.role,
+                phone: item.payload.phone,
+                active: item.payload.active,
+                pin: item.payload.pin // Note: Server POST endpoint hashes PIN
+              })
+            });
+          } else if (item.action === 'update') {
+            await apiFetch(`/api/profiles/${item.targetId}`, {
+              method: 'PUT',
+              body: JSON.stringify({
+                username: item.payload.username,
+                fullName: item.payload.full_name,
+                email: item.payload.email,
+                role: item.payload.role,
+                phone: item.payload.phone,
+                active: item.payload.active,
+                pin: item.payload.pin
+              })
+            });
+          } else if (item.action === 'delete') {
+            await apiFetch(`/api/profiles/${item.targetId}`, {
+              method: 'DELETE'
+            });
           }
-          const { data, error } = await supabase.from(item.table).update(item.payload).eq('id', item.targetId).select();
-          if (item.table === 'products') {
-            console.log(`[Supabase Sync Response] Products update result: data=`, JSON.stringify(data), `error=`, JSON.stringify(error));
+        } else if (item.table === 'categories') {
+          if (item.action === 'insert') {
+            await apiFetch('/api/categories', {
+              method: 'POST',
+              body: JSON.stringify({
+                name: item.payload.name,
+                isCustom: item.payload.is_custom
+              })
+            });
+          } else if (item.action === 'delete') {
+            await apiFetch(`/api/categories/${item.targetId}`, {
+              method: 'DELETE'
+            });
           }
-          if (error) {
-            console.error(`[Offline Sync] Update error for ${item.table}:`, error);
-            if (isTransientError(error)) {
-              throw new Error(`Transient: ${error.message || 'database timeout'}`);
-            }
+        } else if (item.table === 'expenses') {
+          if (item.action === 'insert') {
+            await apiFetch('/api/expenses', {
+              method: 'POST',
+              body: JSON.stringify({
+                id: item.payload.id,
+                category: item.payload.category,
+                itemName: item.payload.item_name,
+                amount: item.payload.amount,
+                date: item.payload.date,
+                notes: item.payload.notes
+              })
+            });
           }
-        } else if (item.action === 'delete') {
-          const { error } = await supabase.from(item.table).delete().eq('id', item.targetId);
-          if (error) {
-            console.error(`[Offline Sync] Delete error for ${item.table}:`, error);
-            if (isTransientError(error)) {
-              throw new Error(`Transient: ${error.message || 'database timeout'}`);
-            }
+        } else if (item.table === 'suppliers') {
+          if (item.action === 'insert') {
+            await apiFetch('/api/suppliers', {
+              method: 'POST',
+              body: JSON.stringify({
+                id: item.payload.id,
+                name: item.payload.name,
+                phone: item.payload.phone,
+                email: item.payload.email,
+                location: item.payload.location,
+                productsSupplied: item.payload.products_supplied
+              })
+            });
+          }
+        } else if (item.table === 'stock_logs') {
+          if (item.action === 'insert') {
+            await apiFetch('/api/stock-logs', {
+              method: 'POST',
+              body: JSON.stringify({
+                id: item.payload.id,
+                productId: item.payload.product_id,
+                productName: item.payload.product_name,
+                changeQty: item.payload.change_qty,
+                type: item.payload.type,
+                notes: item.payload.notes,
+                timestamp: item.payload.timestamp
+              })
+            });
           }
         }
       } catch (err: any) {
+        console.error(`[Offline Sync] Error processing sync item in queue:`, err);
         const errMsg = (err.message || '').toLowerCase();
-        if (errMsg.includes('failed to fetch') || errMsg.includes('network') || errMsg.includes('timeout') || errMsg.includes('transient')) {
+        if (errMsg.includes('fetch') || errMsg.includes('network') || errMsg.includes('timeout') || errMsg.includes('connection')) {
           console.warn("[Offline Sync] Network/Server connectivity lost. Halting sync queue.");
-          console.log('[Queue after halt]', getSyncQueue());
-          console.log('[Queue items details]', getSyncQueue().map(q => ({ table: q.table, action: q.action })));
           hasNetworkError = true;
           remainingQueue.push(item);
-        } else {
-          console.error(`[Offline Sync] Permanent error processing queue item:`, err);
         }
       }
     }
