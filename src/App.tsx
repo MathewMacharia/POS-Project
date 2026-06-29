@@ -829,7 +829,6 @@ export default function App() {
     }
   }, [currentUser, products, addAuditLog]);
 
-  // ----- 5. CORE INVENTORY ACTIONS: REGISTER, MODIFY, DISCARD, RESTOCK -----
   const handleRegisterProduct = async (newProd: Omit<Product, 'id' | 'dateAdded'>) => {
     const timestampISO = new Date().toISOString();
     const productId = crypto.randomUUID();
@@ -840,12 +839,41 @@ export default function App() {
     };
     
     try {
-      setProducts(prev => {
-        const updated = [...prev, productItem];
-        setLocalCache('products', updated.map(toDbProduct));
-        return updated;
-      });
-      queueAction('insert', 'products', toDbProduct(productItem));
+      if (navigator.onLine) {
+        // Online: directly persist via authenticated API route (uses service role key)
+        const savedProduct = await apiFetch('/api/products', {
+          method: 'POST',
+          body: JSON.stringify({
+            id: productId,
+            name: productItem.name,
+            category: productItem.category,
+            barcode: productItem.barcode,
+            buyingPrice: productItem.buyingPrice,
+            sellingPrice: productItem.sellingPrice,
+            quantityInStock: productItem.quantityInStock,
+            supplierName: productItem.supplierName,
+            description: productItem.description,
+            imageUrl: productItem.imageUrl,
+            expiryDate: productItem.expiryDate
+          })
+        });
+
+        // Use server-confirmed data to update state
+        const confirmedProduct = mapProduct(savedProduct);
+        setProducts(prev => {
+          const updated = [...prev, confirmedProduct];
+          setLocalCache('products', updated.map(toDbProduct));
+          return updated;
+        });
+      } else {
+        // Offline: update local state and queue for later sync
+        setProducts(prev => {
+          const updated = [...prev, productItem];
+          setLocalCache('products', updated.map(toDbProduct));
+          return updated;
+        });
+        queueAction('insert', 'products', toDbProduct(productItem));
+      }
 
       // Add stock logarithm for traceability audit
       const stockLogId = crypto.randomUUID();
@@ -872,6 +900,8 @@ export default function App() {
       alert("Product registration failed: " + err.message);
     }
   };
+
+
 
   const handleModifyProduct = async (updatedProd: Product) => {
     try {
@@ -1101,21 +1131,57 @@ export default function App() {
   // ----- 6. USER/CASHIER MANAGEMENT ACTIONS -----
   const handleRegisterUser = async (newUserFields: Omit<User, 'id'> & { pin: string }) => {
     const userId = crypto.randomUUID();
-    const hashedPin = bcrypt.hashSync(newUserFields.pin, 10);
-    const completeUser = {
+    const plainPin = newUserFields.pin; // plaintext for server-side hashing
+    const hashedPinForCache = bcrypt.hashSync(plainPin, 10); // hash only for local offline cache
+    const completeUserForCache = {
       ...newUserFields,
       id: userId,
-      pin: hashedPin
+      pin: hashedPinForCache
     };
 
     try {
-      setUsers(prev => {
-        const updated = [...prev, mapProfile(toDbProfile(completeUser))];
-        setLocalCache('profiles', updated.map(toDbProfile));
-        return updated;
-      });
-      queueAction('insert', 'profiles', toDbProfile(completeUser));
-      addAuditLog('User Registered', `Registered operator credentials for cashiers @${completeUser.username} (${completeUser.fullName}).`);
+      if (navigator.onLine) {
+        // Online: call the authenticated server route directly (server hashes PIN once)
+        const savedProfile = await apiFetch('/api/profiles', {
+          method: 'POST',
+          body: JSON.stringify({
+            username: newUserFields.username,
+            fullName: newUserFields.fullName,
+            email: newUserFields.email,
+            role: newUserFields.role,
+            phone: newUserFields.phone,
+            active: newUserFields.active !== undefined ? newUserFields.active : true,
+            pin: plainPin // server will hash this
+          })
+        });
+
+        // Use server-confirmed profile (has correct hashed PIN in DB)
+        const confirmedUser = mapProfile(savedProfile);
+        setUsers(prev => {
+          const updated = [...prev, confirmedUser];
+          // Store with client-hashed PIN in local cache for offline auth
+          const cacheData = updated.map(u => {
+            const dbRow = toDbProfile(u);
+            return u.id === confirmedUser.id ? { ...dbRow, pin: hashedPinForCache } : dbRow;
+          });
+          setLocalCache('profiles', cacheData);
+          return updated;
+        });
+      } else {
+        // Offline: queue with plaintext PIN so server hashes it exactly once on sync
+        const serverPayload = {
+          ...toDbProfile({ ...newUserFields, id: userId }),
+          pin: plainPin // plaintext — server hashes it
+        };
+        setUsers(prev => {
+          const updated = [...prev, mapProfile(toDbProfile(completeUserForCache))];
+          setLocalCache('profiles', updated.map(toDbProfile));
+          return updated;
+        });
+        queueAction('insert', 'profiles', serverPayload);
+      }
+
+      addAuditLog('User Registered', `Registered operator credentials for cashiers @${newUserFields.username} (${newUserFields.fullName}).`);
     } catch (err: any) {
       alert("Registration failed: " + err.message);
     }
@@ -1145,18 +1211,20 @@ export default function App() {
     if (!userToDel) return;
 
     try {
+      if (navigator.onLine) {
+        // Use the authenticated server route (service role key bypasses RLS)
+        await apiFetch(`/api/profiles/${userId}`, { method: 'DELETE' });
+      } else {
+        // Queue for sync when back online
+        queueAction('delete', 'profiles', null, userId);
+      }
+
+      // Update local state only after confirming the server delete succeeded
       setUsers(prev => {
         const updated = prev.filter(u => u.id !== userId);
         setLocalCache('profiles', updated.map(toDbProfile));
         return updated;
       });
-
-      if (navigator.onLine) {
-        const { error } = await supabase.from('profiles').delete().eq('id', userId);
-        if (error) throw error;
-      } else {
-        queueAction('delete', 'profiles', null, userId);
-      }
 
       addAuditLog('User Deleted', `Deleted cashier/operator credentials for @${userToDel.username} (${userToDel.fullName}).`);
     } catch (err: any) {

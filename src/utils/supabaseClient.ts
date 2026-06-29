@@ -519,8 +519,12 @@ export async function triggerSync(onSyncSuccess?: () => void) {
         if (errMsg.includes('fetch') || errMsg.includes('network') || errMsg.includes('timeout') || errMsg.includes('connection')) {
           console.warn("[Offline Sync] Network/Server connectivity lost. Halting sync queue.");
           hasNetworkError = true;
-          remainingQueue.push(item);
         }
+        // Always retain the item if it failed — never silently discard.
+        // This prevents data loss where a failed insert (e.g. 401 auth) would
+        // remove the item from the queue without it being written to Supabase,
+        // causing records to vanish from the UI after the next page refresh.
+        remainingQueue.push(item);
       }
     }
 
