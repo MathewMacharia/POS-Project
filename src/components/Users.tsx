@@ -18,7 +18,7 @@ import { User } from '../types';
 
 interface UsersProps {
   users: User[];
-  onAddUser: (user: Omit<User, 'id'> & { pin: string }) => void;
+  onAddUser: (user: Omit<User, 'id'> & { pin: string }) => Promise<void>;
   onToggleUserStatus: (userId: string) => void;
   onDeleteUser: (userId: string) => void;
   currentUserRole: 'admin' | 'cashier';
@@ -33,6 +33,8 @@ export default function UsersComponent({
 }: UsersProps) {
   // Modal State
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     username: '',
     fullName: '',
@@ -43,38 +45,49 @@ export default function UsersComponent({
     pin: ''
   });
 
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
+
     if (!formData.username.trim() || !formData.fullName.trim() || !formData.pin.trim()) return;
 
-    // Check unique username
+    // Check unique username locally before sending to server
     const exists = users.some(u => u.username.toLowerCase() === formData.username.trim().toLowerCase());
     if (exists) {
-      alert('This username is already taken. Please provide a different identifier.');
+      setSubmitError('This username is already taken. Please choose a different one.');
       return;
     }
 
-    onAddUser({
-      username: formData.username.trim().toLowerCase(),
-      fullName: formData.fullName.trim(),
-      email: formData.email.trim() || `${formData.username.toLowerCase()}@kenyapos.co.ke`,
-      phone: formData.phone.trim() || '0700000000',
-      role: formData.role,
-      active: formData.active,
-      pin: formData.pin.trim()
-    });
+    setIsSubmitting(true);
+    try {
+      // Await the server call — modal stays open until server confirms or fails
+      await onAddUser({
+        username: formData.username.trim().toLowerCase(),
+        fullName: formData.fullName.trim(),
+        email: formData.email.trim() || `${formData.username.toLowerCase()}@kenyapos.co.ke`,
+        phone: formData.phone.trim() || '0700000000',
+        role: formData.role,
+        active: formData.active,
+        pin: formData.pin.trim()
+      });
 
-    // Reset Form
-    setFormData({
-      username: '',
-      fullName: '',
-      email: '',
-      phone: '',
-      role: 'cashier',
-      active: true,
-      pin: ''
-    });
-    setIsAddUserOpen(false);
+      // Only reset and close after server confirms success
+      setFormData({
+        username: '',
+        fullName: '',
+        email: '',
+        phone: '',
+        role: 'cashier',
+        active: true,
+        pin: ''
+      });
+      setIsAddUserOpen(false);
+    } catch (err: any) {
+      // Show the actual server error inside the modal — don't swallow it
+      setSubmitError(err.message || 'Failed to create operator. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -287,23 +300,41 @@ export default function UsersComponent({
                 />
               </div>
 
+              {/* Inline error — shown inside the modal so it's never lost */}
+              {submitError && (
+                <div className="px-3 py-2 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400 text-xs font-semibold">
+                  {submitError}
+                </div>
+              )}
+
               <div className="flex gap-2 pt-2 text-xs font-semibold">
                 <button
                   type="button"
-                  onClick={() => setIsAddUserOpen(false)}
-                  className="w-1/2 py-2.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-lg"
+                  disabled={isSubmitting}
+                  onClick={() => { setIsAddUserOpen(false); setSubmitError(null); }}
+                  className="w-1/2 py-2.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="w-1/2 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-xs"
+                  disabled={isSubmitting}
+                  className="w-1/2 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-xs disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                 >
-                  Create credentials
+                  {isSubmitting ? (
+                    <>
+                      <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                      </svg>
+                      Saving…
+                    </>
+                  ) : 'Create credentials'}
                 </button>
               </div>
 
             </form>
+
           </div>
         </div>
       )}

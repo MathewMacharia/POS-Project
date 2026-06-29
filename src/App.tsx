@@ -314,8 +314,12 @@ export default function App() {
       }
       return profile;
     });
+    console.log(`[DIAG-Bug2] STEP-1 IndexedDB cache loaded ${sanitizedCached.length} profiles:`, sanitizedCached.map((p: any) => p.username));
     setUsers(sanitizedCached.map(mapProfile));
     setCategories(c.map(mapCategory));
+
+    // [DIAG-Bug3] Log products from IndexedDB cache
+    console.log(`[DIAG-Bug3] STEP-1 IndexedDB cache loaded ${p.length} products:`, p.map((pr: any) => ({ id: pr.id, name: pr.name })));
     setProducts(p.map(mapProduct));
     setSales(s.map(mapSale));
     setExpenses(e.map(mapExpense));
@@ -337,9 +341,12 @@ export default function App() {
         setLocalCache('categories', merged);
       }
 
-      const { data: productsData } = await supabase.from('products').select('*');
+      const { data: productsData, error: productsError } = await supabase.from('products').select('*');
+      // [DIAG-Bug3] Log what Supabase returned for products
+      console.log(`[DIAG-Bug3] STEP-2 Supabase anon SELECT returned ${productsData?.length ?? 0} products (error: ${productsError?.message ?? 'none'}):`, productsData?.map((pr: any) => ({ id: pr.id, name: pr.name })) ?? []);
       if (productsData) {
         const merged = mergeRemoteWithSyncQueue('products', productsData);
+        console.log(`[DIAG-Bug3] STEP-3 After mergeRemoteWithSyncQueue: ${merged.length} products:`, merged.map((pr: any) => ({ id: pr.id, name: pr.name })));
         setProducts(merged.map(mapProduct));
         await setLocalCache('products', merged);
       }
@@ -349,8 +356,11 @@ export default function App() {
         if (currentUser.role === 'admin') {
           // Fetch profiles
           const profilesData = await apiFetch('/api/profiles');
+          // [DIAG-Bug2] Log what the server returned for profiles
+          console.log(`[DIAG-Bug2] STEP-2 Server GET /api/profiles returned ${profilesData?.length ?? 0} profiles:`, profilesData?.map((p: any) => p.username) ?? []);
           if (profilesData) {
             const merged = mergeRemoteWithSyncQueue('profiles', profilesData);
+            console.log(`[DIAG-Bug2] STEP-3 After mergeRemoteWithSyncQueue: ${merged.length} profiles:`, merged.map((p: any) => p.username));
             const sanitized = merged.map((p: any) => {
               if (p.username === 'admin' && (p.full_name === 'Erick Omondi' || p.full_name === 'Erick oMONDI' || p.full_name === 'Erick')) {
                 p.full_name = 'admin';
@@ -1212,8 +1222,17 @@ export default function App() {
 
     try {
       if (navigator.onLine) {
+        // [DIAG-Bug2] Log sync queue BEFORE delete — check if this user has a queued insert
+        const queueBefore = JSON.parse(localStorage.getItem('dufuka_sync_queue') || '[]');
+        console.log(`[DIAG-Bug2] DELETE triggered for @${userToDel.username} (${userId}). Sync queue BEFORE delete (${queueBefore.length} items):`, queueBefore.map((q: any) => ({ action: q.action, table: q.table, id: q.payload?.id || q.targetId })));
+
         // Use the authenticated server route (service role key bypasses RLS)
-        await apiFetch(`/api/profiles/${userId}`, { method: 'DELETE' });
+        const deleteResult = await apiFetch(`/api/profiles/${userId}`, { method: 'DELETE' });
+        console.log(`[DIAG-Bug2] DELETE /api/profiles/${userId} response:`, deleteResult);
+
+        // [DIAG-Bug2] Log sync queue AFTER delete — check if anything changed
+        const queueAfter = JSON.parse(localStorage.getItem('dufuka_sync_queue') || '[]');
+        console.log(`[DIAG-Bug2] Sync queue AFTER delete (${queueAfter.length} items):`, queueAfter.map((q: any) => ({ action: q.action, table: q.table, id: q.payload?.id || q.targetId })));
       } else {
         // Queue for sync when back online
         queueAction('delete', 'profiles', null, userId);
@@ -1222,15 +1241,18 @@ export default function App() {
       // Update local state only after confirming the server delete succeeded
       setUsers(prev => {
         const updated = prev.filter(u => u.id !== userId);
+        console.log(`[DIAG-Bug2] Local state updated. Remaining profiles (${updated.length}):`, updated.map(u => u.username));
         setLocalCache('profiles', updated.map(toDbProfile));
         return updated;
       });
 
       addAuditLog('User Deleted', `Deleted cashier/operator credentials for @${userToDel.username} (${userToDel.fullName}).`);
     } catch (err: any) {
+      console.error(`[DIAG-Bug2] DELETE failed with error:`, err);
       alert("Delete operator failed: " + err.message);
     }
   };
+
 
   // ----- 7. DATABASE BACKUP AND RESTORE OPERATIONS -----
   const triggerDownloadBackupJSON = () => {
